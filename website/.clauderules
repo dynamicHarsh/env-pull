@@ -1,0 +1,21 @@
+# Architectural Rules & Constraints
+
+## Next.js App Router Strictness
+1. Use React Server Components (RSC) by default.
+2. Only append `"use client"` when interactivity, hooks (useState, useEffect), or event listeners are strictly required (e.g., Framer Motion components, terminal animations).
+3. Do not use the `pages/` directory. All routing must occur in `app/`.
+4. Utilize `layout.tsx` for global UI (Nav, Footer) and `page.tsx` for route-specific content.
+
+## Styling & Tailwind Constraints
+1. **Zero Custom CSS Files:** Use Tailwind utility classes strictly. If a complex gradient or animation is required, extend the `tailwind.config.ts`.
+2. **Color Palette:** Stick to a strict dark-mode palette (zinc-900, zinc-950 backgrounds, zinc-100 text, highly specific accent colors like a neon terminal green or sharp blue). No muddy or uncalibrated colors.
+3. **Typography:** Heavily utilize monospace fonts (`font-mono`) for anything technical (commands, code blocks, feature names). 
+4. **Spacing:** Maintain generous, consistent padding and margins (e.g., `py-24` for sections) to ensure a breathable, minimal layout.
+
+## Tooling & Puppeteer QA
+1. **Self-Correction:** Before completing any significant visual task, you MUST run `npm run lint` and `npm run build` to ensure no regressions.
+2. **Visual Verification:** Because you have access to Puppeteer, you are expected to render and visually analyze the DOM/layout when building complex UI elements (like the hero terminal animation or responsive grids). Compare your output conceptually against standard developer tools (like jwt.io) to ensure it is "picture perfect", legible, and strictly aligned.
+
+## Component Architecture
+1. Keep components highly modular. If a page file exceeds 150 lines, extract sections (e.g., `HeroSection.tsx`, `FeatureGrid.tsx`) into a `components/` directory.
+2. Use standard modern React practices: destructure props, use TypeScript interfaces/types for all component props.
