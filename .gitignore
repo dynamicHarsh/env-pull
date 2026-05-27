@@ -1,6 +1,7 @@
 # ── Compiled binaries ────────────────────────────────────────────────────────
 bin/
-dist/           # GoReleaser build output — never commit compiled artifacts
+# GoReleaser build output — never commit compiled artifacts
+dist/
 *.exe
 *.exe~
 *.dll
@@ -25,12 +26,25 @@ vendor/
 .cache/
 
 # ── Secret & environment files — NEVER commit plaintext secrets ───────────────
-# .env.*  covers .env.pull.enc (the encrypted local vault) and any .env.* files.
+# .env.* covers .env.pull.enc (the encrypted local vault) and any .env.* files.
 # Committing the vault is safe cryptographically, but it is user-specific;
 # keep it local unless your team explicitly decides to share it in the repo.
 .env
 .env.*
 *.env
+
+# ── Node.js / web frontend (website/) ────────────────────────────────────────
+# website/ is a plain directory in this repo (no longer a submodule).
+# These patterns apply tree-wide so node_modules anywhere is excluded.
+node_modules/
+# Next.js build cache and output
+.next/
+# Next.js static export output
+out/
+.pnp
+.pnp.*
+# TypeScript incremental build info (generated, not source)
+*.tsbuildinfo
 
 # ── Editor and IDE artifacts ──────────────────────────────────────────────────
 .idea/
@@ -39,17 +53,6 @@ vendor/
 *.swo
 *.suo
 *.user
-
-# ── Node.js / web frontend (website/) ────────────────────────────────────────
-# website/ is a nested git repo with its own .gitignore, but those rules only
-# apply when git runs inside that repo. These tree-wide patterns protect the
-# parent repo if the nested .git is ever removed or the directory is flattened.
-node_modules/
-.next/          # Next.js build cache and output
-out/            # Next.js static export output
-.pnp
-.pnp.*
-*.tsbuildinfo   # TypeScript incremental build info (generated, not source)
 
 # ── OS artifacts ──────────────────────────────────────────────────────────────
 .DS_Store
