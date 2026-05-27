@@ -40,6 +40,32 @@ checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
 
+brews:
+  - name: env-pull
+    homepage: "https://github.com/dynamicHarsh/env-pull"
+    description: "Universal Secrets Adapter"
+    license: "MIT"
+    repository:
+      owner: dynamicHarsh
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    install: |
+      bin.install "env-pull"
+    test: |
+      system "#{bin}/env-pull", "--version"
+
+scoops:
+  - name: env-pull
+    homepage: "https://github.com/dynamicHarsh/env-pull"
+    description: "Universal Secrets Adapter"
+    license: "MIT"
+    repository:
+      owner: dynamicHarsh
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: bucket
+
 changelog:
   sort: asc
   filters:
