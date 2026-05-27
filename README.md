@@ -27,22 +27,7 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 - **Never appear in logs** or shell history.
 - **Vanish automatically** the moment your process exits — no cleanup required.
 
-```
-┌──────────────┐     fetch      ┌─────────────────────────┐
-│  env-pull    │ ─────────────► │  AWS Secrets Manager    │
-│  (wrapper)   │                │  or local vault (.enc)  │
-└──────┬───────┘                └─────────────────────────┘
-       │
-       │  spawn child with secrets in environment (memory only)
-       ▼
-┌──────────────┐
-│  your-app    │  ← sees DB_PASSWORD, API_KEY, etc. as env vars
-└──────────────┘
-       │
-       │  process exits → environment is reclaimed by OS
-       ▼
-      (secrets gone)
-```
+<img width="791" height="701" alt="Screenshot 2026-05-27 212844" src="https://github.com/user-attachments/assets/b0e6e0aa-5f78-4b8c-9c4a-d8d31f319add" />
 
 ---
 
