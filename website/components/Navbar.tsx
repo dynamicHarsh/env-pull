@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { siGithub } from "simple-icons";
+import SimpleIconComponent from "@/components/ui/SimpleIcon";
 
 const navLinks = [
   { label: "Features", href: "#features" },
@@ -52,12 +54,23 @@ export default function Navbar() {
         </ul>
 
         {/* Desktop CTA */}
-        <a
-          href="#enterprise"
-          className="hidden md:inline-flex items-center bg-[#f4f4f5] text-zinc-950 px-4 py-2 rounded-md font-mono text-sm font-semibold hover:bg-[#e4e4e7] transition-colors shrink-0"
-        >
-          Get Started
-        </a>
+        <div className="hidden md:flex items-center gap-3 shrink-0">
+          <a
+            href="https://github.com/dynamicHarsh/env-pull"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub repository"
+            className="text-zinc-400 hover:text-zinc-100 transition-colors duration-200"
+          >
+            <SimpleIconComponent icon={siGithub} size={18} />
+          </a>
+          <a
+            href="#enterprise"
+            className="inline-flex items-center bg-[#f4f4f5] text-zinc-950 px-4 py-2 rounded-md font-mono text-sm font-semibold hover:bg-[#e4e4e7] transition-colors"
+          >
+            Get Started
+          </a>
+        </div>
 
         {/* Mobile hamburger */}
         <button
@@ -98,13 +111,22 @@ export default function Navbar() {
                   </a>
                 </li>
               ))}
-              <li className="pt-3 border-t border-zinc-800/50 mt-1">
+              <li className="pt-3 border-t border-zinc-800/50 mt-1 flex items-center gap-3">
                 <a
                   href="#enterprise"
                   onClick={() => setMobileOpen(false)}
                   className="inline-flex items-center bg-[#f4f4f5] text-zinc-950 px-4 py-2 rounded-md font-mono text-sm font-semibold hover:bg-[#e4e4e7] transition-colors"
                 >
                   Get Started
+                </a>
+                <a
+                  href="https://github.com/dynamicHarsh/env-pull"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="GitHub repository"
+                  className="text-zinc-400 hover:text-zinc-100 transition-colors duration-200 p-2"
+                >
+                  <SimpleIconComponent icon={siGithub} size={18} />
                 </a>
               </li>
             </ul>

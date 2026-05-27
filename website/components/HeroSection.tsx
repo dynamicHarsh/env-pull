@@ -11,13 +11,8 @@ const commands = {
     "scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install env-pull",
 };
 
-function detectOs(): "mac" | "windows" {
-  if (typeof navigator === "undefined") return "mac";
-  return navigator.userAgent.includes("Win") ? "windows" : "mac";
-}
-
 export default function HeroSection() {
-  const [os, setOs] = useState<"mac" | "windows">(detectOs);
+  const [os, setOs] = useState<"mac" | "windows">("mac");
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -83,10 +78,7 @@ export default function HeroSection() {
 
       {/* Install pill */}
       <div className="flex items-center justify-between bg-[#18181b] border border-zinc-800 rounded-full px-5 py-3 w-full max-w-2xl mx-auto overflow-hidden mb-16">
-        <span
-          suppressHydrationWarning
-          className="font-mono text-sm text-zinc-300 overflow-x-auto whitespace-nowrap scrollbar-hide flex-grow mr-4"
-        >
+        <span className="font-mono text-sm text-zinc-300 overflow-x-auto whitespace-nowrap scrollbar-hide flex-grow mr-4">
           {commands[os]}
         </span>
         <motion.button
