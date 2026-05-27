@@ -1,0 +1,58 @@
+# ── Compiled binaries ────────────────────────────────────────────────────────
+bin/
+dist/           # GoReleaser build output — never commit compiled artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# ── Go test & coverage artifacts ─────────────────────────────────────────────
+*.test
+*.out
+*.pprof
+coverage.txt
+coverage.html
+
+# ── Go workspace (local multi-module development) ─────────────────────────────
+go.work
+go.work.sum
+
+# ── Vendored dependencies (only if not intentionally vendoring) ───────────────
+vendor/
+
+# ── Build / tool caches ───────────────────────────────────────────────────────
+.cache/
+
+# ── Secret & environment files — NEVER commit plaintext secrets ───────────────
+# .env.*  covers .env.pull.enc (the encrypted local vault) and any .env.* files.
+# Committing the vault is safe cryptographically, but it is user-specific;
+# keep it local unless your team explicitly decides to share it in the repo.
+.env
+.env.*
+*.env
+
+# ── Editor and IDE artifacts ──────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*.suo
+*.user
+
+# ── Node.js / web frontend (website/) ────────────────────────────────────────
+# website/ is a nested git repo with its own .gitignore, but those rules only
+# apply when git runs inside that repo. These tree-wide patterns protect the
+# parent repo if the nested .git is ever removed or the directory is flattened.
+node_modules/
+.next/          # Next.js build cache and output
+out/            # Next.js static export output
+.pnp
+.pnp.*
+*.tsbuildinfo   # TypeScript incremental build info (generated, not source)
+
+# ── OS artifacts ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db

@@ -1,0 +1,18 @@
+# Strict Development Standards for env-pull
+
+## Go Idioms & Formatting
+- Always use idiomatic Go. Write clean, readable, and highly modular code.
+- Keep Cobra command handlers thin. Delegate actual execution logic to modules inside the `/internal` directory.
+- Never use `panic` in business logic; handle errors gracefully and return them.
+
+## Error Handling
+- Use structured error handling. Wrap errors with context using `fmt.Errorf("failed to do X: %w", err)`.
+- If a security or decryption step fails, fail fast and loudly to the CLI output.
+
+## Security Constraints
+- NEVER log the contents of an environment variable or secret to `stdout`, `stderr`, or a log file.
+- When dealing with byte slices containing decrypted keys (e.g., from `env-edit`), aggressively overwrite/zero out the memory buffer as soon as it is no longer needed.
+
+## Testing
+- Write table-driven tests (`[]struct{ name, input, expected }`) for all core logic.
+- Mock external dependencies (like the filesystem or upstream Vault APIs) using Go interfaces.

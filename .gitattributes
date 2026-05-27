@@ -1,0 +1,3 @@
+# Prevent GitHub Linguist from classifying the repo based on vendored
+# or generated content inside website/.
+website/* linguist-vendored
