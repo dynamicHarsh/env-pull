@@ -33,9 +33,14 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ## Installation
 
-### Homebrew (macOS / Linux) — coming soon
+### Homebrew (macOS / Linux)
 ```bash
-brew install harsh-sonkar/tap/env-pull
+brew tap dynamicHarsh/tap && brew install env-pull
+```
+
+### Scoop (Windows)
+```powershell
+scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install env-pull
 ```
 
 ### GitHub Releases
