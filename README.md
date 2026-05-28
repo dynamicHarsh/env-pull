@@ -223,21 +223,16 @@ Run 'env-pull <command> --help' for detailed usage.
 
 ## No Vendor Lock-In
 
-Decide `env-pull` isn't for you? You can easily extract your secrets back to a standard plaintext file at any time. We don't hold your credentials hostage.
-```bash
-env-pull export > .env
-```
+Decide `env-pull` isn't for you? Run `env-pull export > .env` to decrypt your vault back to a standard plaintext file at any time. We don't hold your credentials hostage.
 
 ---
 
-## 🗺️ Roadmap Integrations
+## Roadmap
 
-We are actively building zero-config integrations for:
-
-- [ ] GCP Secret Manager
-- [ ] Azure Key Vault
-- [ ] 1Password CLI (`--op-secret`)
-- [ ] Bitwarden CLI (`--bw-secret`)
+- GCP Secret Manager — Coming Soon
+- Azure Key Vault — Coming Soon
+- 1Password CLI — Coming Soon
+- Bitwarden CLI — Coming Soon
 
 ---
 

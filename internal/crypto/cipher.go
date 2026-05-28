@@ -51,11 +51,14 @@ func Decrypt(ciphertext, key []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// zeroBytes overwrites b with zeros to limit the lifetime of sensitive data in
+// ZeroBytes overwrites b with zeros to limit the lifetime of sensitive data in
 // memory. This is best-effort: the Go runtime may have already copied the data
 // to other heap locations during GC.
-func zeroBytes(b []byte) {
+func ZeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
 }
+
+// zeroBytes is the unexported alias used within this package.
+func zeroBytes(b []byte) { ZeroBytes(b) }
