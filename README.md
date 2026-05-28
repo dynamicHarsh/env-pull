@@ -31,6 +31,12 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ---
 
+## Demo
+
+![env-pull demo](demo.gif)
+
+---
+
 ### How Does It Compare?
 
 | Feature | `env-pull` | Traditional `.env` | HashiCorp Vault Agent |
