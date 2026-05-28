@@ -33,7 +33,7 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ## Demo
 
-![env-pull demo](demo.gif)
+<img width="949" height="461" alt="env-pull-demo-ezgif com-optimize (1)" src="https://github.com/user-attachments/assets/d8b63f16-2c53-4e70-8fdd-03f9e3164b68" />
 
 ---
 
