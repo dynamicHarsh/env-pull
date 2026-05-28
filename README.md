@@ -1,8 +1,8 @@
 # env-pull
 
-**A Universal Secrets Adapter. Zero-disk. Zero-config.**
+**A zero-disk, zero-config CLI that securely injects secrets into your app at runtime—killing the plaintext `.env` file forever.**
 
-> Stop putting secrets in `.env` files. Start injecting them.
+> Stop pasting credentials into `.env` files. Start injecting them via process tree inheritance.
 
 ---
 
@@ -28,6 +28,17 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 - **Vanish automatically** the moment your process exits — no cleanup required.
 
 <img width="791" height="701" alt="Screenshot 2026-05-27 212844" src="https://github.com/user-attachments/assets/b0e6e0aa-5f78-4b8c-9c4a-d8d31f319add" />
+
+---
+
+### How Does It Compare?
+
+| Feature | `env-pull` | Traditional `.env` | HashiCorp Vault Agent |
+| :--- | :--- | :--- | :--- |
+| **Plaintext on Disk** | ❌ Never | ❌ Always | ❌ Sometimes (if not strict) |
+| **Setup Time** | ⚡️ < 30 seconds | ⚡️ < 30 seconds | 🐢 Hours / Days |
+| **Requires Code Changes?** | ❌ No (Zero SDKs) | ❌ No | ⚠️ Yes (with SDKs) |
+| **Background Daemon** | ❌ No | ❌ No | ⚠️ Yes |
 
 ---
 
@@ -92,6 +103,13 @@ env-pull run -- npm start
 env-pull run -- python manage.py runserver
 env-pull run -- psql --host=localhost mydb
 ```
+
+**Step 3: Sync with your team (No cloud required)**
+1. Commit the encrypted `.env.pull.enc` file directly to your Git repository.
+2. Securely share the `master.key` with your team once (e.g., via 1Password, Bitwarden, or Slack).
+3. Everyone places the key in `~/.config/env-pull/master.key`.
+
+Now, your whole team has synchronized secrets, but your Git history remains completely free of plaintext credentials.
 
 ---
 
@@ -194,6 +212,26 @@ Run 'env-pull <command> --help' for detailed usage.
 > filesystems (APFS, ZFS, most NVMe SSDs), the OS may retain previous data
 > at the hardware level. `env-pull` mitigates risk at the software layer; it
 > does not make guarantees about physical storage media.
+
+---
+
+## No Vendor Lock-In
+
+Decide `env-pull` isn't for you? You can easily extract your secrets back to a standard plaintext file at any time. We don't hold your credentials hostage.
+```bash
+env-pull export > .env
+```
+
+---
+
+## 🗺️ Roadmap Integrations
+
+We are actively building zero-config integrations for:
+
+- [ ] GCP Secret Manager
+- [ ] Azure Key Vault
+- [ ] 1Password CLI (`--op-secret`)
+- [ ] Bitwarden CLI (`--bw-secret`)
 
 ---
 
