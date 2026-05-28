@@ -7,6 +7,7 @@ MODULE      := github.com/harsh-sonkar/env-pull
 ## build: compile the binary into ./bin/
 build:
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) .
+#go build -o bin\env-pull.exe .
 
 ## test: run all tests with the race detector enabled
 test:
