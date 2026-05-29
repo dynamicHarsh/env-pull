@@ -21,7 +21,7 @@ export default function Navbar() {
     <header className="sticky top-0 z-50 bg-zinc-950/70 backdrop-blur-md border-b border-zinc-800/50">
       <nav className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Brand */}
-        <Link href="/" className="flex items-center gap-0 shrink-0">
+        <Link href="/" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="flex items-center gap-0 shrink-0">
           <span className="font-mono font-bold text-zinc-100 tracking-tight text-sm">
             env-pull
           </span>

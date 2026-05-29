@@ -84,7 +84,7 @@ export default function HeroSection() {
         <motion.button
           onClick={handleCopy}
           aria-label="Copy install command"
-          className="shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
           transition={{ type: "spring", stiffness: 400, damping: 17 }}

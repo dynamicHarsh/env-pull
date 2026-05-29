@@ -15,9 +15,37 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "env-pull — Universal Secrets Adapter",
+  metadataBase: new URL("https://envpull.tech"),
+  title: {
+    default: "env-pull | The Universal Secrets Adapter",
+    template: "%s | env-pull",
+  },
   description:
-    "Zero-disk, zero-config secrets injection for local development. Fetch from AWS, 1Password, or an encrypted local vault.",
+    "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files. Secure your local workflow with AWS and 1Password integration.",
+  keywords: [
+    "secrets management",
+    "cli",
+    "developer tools",
+    "env variables",
+    "zero-trust",
+    "open source",
+    "devsecops",
+    "local development",
+  ],
+  openGraph: {
+    type: "website",
+    url: "https://envpull.tech",
+    title: "env-pull | The Universal Secrets Adapter",
+    description:
+      "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files.",
+    siteName: "env-pull",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "env-pull | The Universal Secrets Adapter",
+    description:
+      "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files.",
+  },
 };
 
 export default function RootLayout({
