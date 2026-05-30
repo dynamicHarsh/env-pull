@@ -246,7 +246,7 @@ A centralised audit and governance layer is in active development. It will inclu
 - **Team vaults** — shared encrypted vaults with per-member access control.
 - **SSO / OIDC integration** — replace static AWS credentials with short-lived OIDC tokens.
 
-[Sign up for early access →](https://github.com/harsh-sonkar/env-pull)
+[Sign up for early access →](https://tally.so/r/rjvLXv)
 
 ---
 
