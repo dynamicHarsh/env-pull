@@ -85,6 +85,9 @@ func Run(request Request) error {
 		fmt.Fprintln(request.Output, "No changes made; rerun with explicit confirmation")
 		return nil
 	}
+	if err := validateValidationCommand(request.Validate); err != nil {
+		return err
+	}
 
 	if err := os.WriteFile(filepath.Join(request.Directory, project.FileName), configData, 0o644); err != nil {
 		return fmt.Errorf("setup: write inject.toml: %w", err)
@@ -93,9 +96,6 @@ func Run(request Request) error {
 		if err := os.WriteFile(filepath.Join(request.Directory, "package.json"), packageChange, 0o644); err != nil {
 			return fmt.Errorf("setup: update package.json: %w", err)
 		}
-	}
-	if len(request.Validate) == 0 {
-		return fmt.Errorf("setup: a finite validation command is required")
 	}
 	if err := runValidation(request); err != nil {
 		return fmt.Errorf("setup: validation failed: %w", err)
@@ -273,9 +273,6 @@ func runValidation(request Request) error {
 	if request.RunValidation != nil {
 		return request.RunValidation(request.Validate)
 	}
-	if containsLongRunningMarker(request.Validate) {
-		return fmt.Errorf("validation command must be finite")
-	}
 	provider, err := vaults.NewOnePasswordProvider()
 	if err != nil {
 		return err
@@ -288,6 +285,16 @@ func runValidation(request Request) error {
 }
 
 func requestContext() context.Context { return context.Background() }
+
+func validateValidationCommand(command []string) error {
+	if len(command) == 0 {
+		return fmt.Errorf("setup: a finite validation command is required")
+	}
+	if containsLongRunningMarker(command) {
+		return fmt.Errorf("setup: validation command must be finite")
+	}
+	return nil
+}
 
 func containsLongRunningMarker(command []string) bool {
 	for _, argument := range command {

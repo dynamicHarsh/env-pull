@@ -87,6 +87,25 @@ func TestRunDoesNotOverwriteExistingConfiguration(t *testing.T) {
 	}
 }
 
+func TestRunRejectsNonFiniteValidationBeforeWritingConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	request := request(directory, io.Discard)
+	request.Confirm = true
+	request.Validate = []string{"npm", "run", "dev"}
+	request.RunValidation = func([]string) error {
+		t.Fatal("RunValidation() was called for a non-finite command")
+		return nil
+	}
+
+	err := setup.Run(request)
+	if err == nil || err.Error() != "setup: validation command must be finite" {
+		t.Fatalf("Run() error = %v, want non-finite validation command error", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration written", err)
+	}
+}
+
 func TestRunUsesExplicitBindingForUnsafePackageScript(t *testing.T) {
 	directory := t.TempDir()
 	packagePath := filepath.Join(directory, "package.json")
