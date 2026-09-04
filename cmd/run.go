@@ -21,7 +21,7 @@ import (
 var runCmd = &cobra.Command{
 	Use:   "run [--aws-secret <name>] <command> [args...]",
 	Short: "Run a command with vault secrets injected into its environment",
-	Long: `run is the core command of env-pull. It resolves secrets from a vault,
+	Long: `run is the core command of inject. It resolves secrets from a vault,
 then spawns your target command as a transparent child process with those
 secrets present in its environment. The child sees them as ordinary env vars;
 they vanish when it exits. Nothing is written to disk.
@@ -40,7 +40,7 @@ SECRET SOURCES  (mutually exclusive)
       → EC2 / ECS / EKS IAM instance role
 
   (no flag — default)
-    Decrypts ` + defaultVaultFile + ` (managed by 'env-pull edit') and
+	Decrypts ` + defaultVaultFile + ` (managed by 'inject edit') and
     injects its contents. If the vault file does not exist, the command
     runs with no extra secrets — useful for environments where secrets
     arrive via the ambient environment already.
@@ -48,18 +48,18 @@ SECRET SOURCES  (mutually exclusive)
 USAGE EXAMPLES
 
   # Inject from AWS Secrets Manager
-  env-pull run --aws-secret prod/my-app -- ./server
+	inject run --aws-secret prod/my-app -- ./server
 
   # Inject from local encrypted vault
-  env-pull run -- ./server
+	inject run -- ./server
 
-  # Pass flags to the child command (use -- to stop env-pull flag parsing)
-  env-pull run --aws-secret prod/db -- psql --host=localhost mydb
+	# Pass flags to the child command (use -- to stop inject flag parsing)
+	inject run --aws-secret prod/db -- psql --host=localhost mydb
 
   # Works with any program, including shell built-ins via a shell wrapper
-  env-pull run -- printenv DB_PASSWORD
+	inject run -- printenv DB_PASSWORD
 
-NOTE: all env-pull flags must appear before the child command. Arguments
+NOTE: all inject flags must appear before the child command. Arguments
 after the child binary name are passed through unchanged, including flags
 that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 
@@ -73,6 +73,9 @@ that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 		}
 
 		awsSecretName, childArgs := extractAWSSecretFlag(args)
+		if len(childArgs) > 0 && childArgs[0] == "--" {
+			childArgs = childArgs[1:]
+		}
 		if len(childArgs) == 0 {
 			return fmt.Errorf("run: a command to execute is required after --aws-secret")
 		}
@@ -91,7 +94,7 @@ that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 		}
 
 		if err := executor.RunCommand(childArgs, secrets); err != nil {
-			// Preserve the child's exact exit code so env-pull is a
+			// Preserve the child's exact exit code so inject is a
 			// transparent wrapper from the caller's perspective.
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {

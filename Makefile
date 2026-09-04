@@ -1,4 +1,5 @@
-BINARY_NAME := env-pull
+BINARY_NAME := inject
+LEGACY_BINARY_NAME := env-pull
 BUILD_DIR   := ./bin
 MODULE      := github.com/harsh-sonkar/env-pull
 
@@ -7,7 +8,7 @@ MODULE      := github.com/harsh-sonkar/env-pull
 ## build: compile the binary into ./bin/
 build:
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) .
-#go build -o bin\env-pull.exe .
+	cp $(BUILD_DIR)/$(BINARY_NAME) $(BUILD_DIR)/$(LEGACY_BINARY_NAME)
 
 ## test: run all tests with the race detector enabled
 test:
