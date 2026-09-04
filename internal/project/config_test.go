@@ -3,6 +3,7 @@ package project_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harsh-sonkar/env-pull/internal/project"
 )
@@ -47,6 +48,45 @@ item_id = "abc123"
 	}
 	if config.Profiles["default"].Provider != "bitwarden" {
 		t.Errorf("provider = %q, want bitwarden", config.Profiles["default"].Provider)
+	}
+}
+
+func TestParseAcceptsOptInRemoteCachePolicy(t *testing.T) {
+	config, err := project.Parse([]byte(`format_version = 1
+project_id = "billing-api"
+
+[cache]
+enabled = true
+
+[profiles.default]
+provider = "bitwarden"
+item_id = "abc123"
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if !config.Cache.Enabled {
+		t.Error("cache is not enabled")
+	}
+	if config.Cache.MaxAge.Duration != 24*time.Hour {
+		t.Errorf("cache maximum age = %v, want 24h", config.Cache.MaxAge.Duration)
+	}
+}
+
+func TestParseRejectsNonPositiveCacheMaximumAge(t *testing.T) {
+	_, err := project.Parse([]byte(`format_version = 1
+project_id = "billing-api"
+
+[cache]
+enabled = true
+max_age = "0s"
+
+[profiles.default]
+provider = "bitwarden"
+item_id = "abc123"
+`))
+	if err == nil {
+		t.Fatal("Parse() error = nil, want non-positive cache maximum age rejected")
 	}
 }
 

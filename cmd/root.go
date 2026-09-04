@@ -50,7 +50,7 @@ func registerBindings() {
 			Short: "Run the configured " + name + " command",
 			Args:  cobra.NoArgs,
 			RunE: func(_ *cobra.Command, _ []string) error {
-				secrets, err := loadProfileSecrets(binding.Profile)
+				secrets, err := loadProfileSecrets(binding.Profile, false)
 				if err != nil {
 					return err
 				}

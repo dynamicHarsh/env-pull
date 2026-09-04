@@ -32,11 +32,14 @@ func removeProject(directory string, credentialStore store.Store) error {
 		return fmt.Errorf("remove: %w", err)
 	}
 	for profileName, profile := range config.Profiles {
-		if profile.Provider != "local" {
+		if profile.Provider == "local" {
+			if err := credentialStore.Delete(config.ProjectID, profileName); err != nil && err != store.ErrUnavailable {
+				return fmt.Errorf("remove: delete local profile %q: %w", profileName, err)
+			}
 			continue
 		}
-		if err := credentialStore.Delete(config.ProjectID, profileName); err != nil && err != store.ErrUnavailable {
-			return fmt.Errorf("remove: delete local profile %q: %w", profileName, err)
+		if err := credentialStore.DeleteCache(config.ProjectID, profileName); err != nil && err != store.ErrUnavailable {
+			return fmt.Errorf("remove: delete remote cache for profile %q: %w", profileName, err)
 		}
 	}
 	if err := os.Remove(configPath); err != nil {
