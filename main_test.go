@@ -129,3 +129,39 @@ item_id = "stable-note-id"
 		t.Errorf("child launch sentinel stat error = %v, want not exist", err)
 	}
 }
+
+func TestSetupWritesConfirmedConfigurationAfterValidation(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	opPath := filepath.Join(projectDir, "op")
+	op := "#!/bin/sh\nif [ \"$1\" = account ]; then exit 0; fi\nprintf '%s\\n' '{\"fields\":[{\"id\":\"notesPlain\",\"value\":\"TOKEN=from-note\\n\"}]}'\n"
+	if err := os.WriteFile(opPath, []byte(op), 0o700); err != nil {
+		t.Fatalf("write fake op: %v", err)
+	}
+
+	command := exec.Command(binaryPath,
+		"setup", "--project-id", "billing-api", "--account", "acme", "--vault", "Engineering", "--item-id", "stable-note-id", "--yes",
+		"--validate=sh", "--validate=-c", "--validate=exit 0",
+	)
+	command.Dir = projectDir
+	command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run setup: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "Validation succeeded") {
+		t.Errorf("setup output = %q, want validation confirmation", output)
+	}
+	config, err := os.ReadFile(filepath.Join(projectDir, "inject.toml"))
+	if err != nil {
+		t.Fatalf("read inject.toml: %v", err)
+	}
+	if strings.Contains(string(config), "TOKEN=") || !strings.Contains(string(config), "item_id = \"stable-note-id\"") {
+		t.Errorf("inject.toml = %q, want non-secret remote reference", config)
+	}
+}
