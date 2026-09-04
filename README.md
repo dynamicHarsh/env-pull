@@ -1,269 +1,199 @@
 # inject
 
-**A zero-disk CLI that injects secrets into your app at runtime.**
+**Inject a project's secrets into a foreground child process, without a plaintext `.env` file.**
 
-`inject` is the primary command. `env-pull` remains a temporary compatibility alias and prints a migration notice.
+`inject` is a command-line adapter, not a secret manager. It reads a non-secret `inject.toml` configuration, retrieves a complete secret set from your existing provider or the OS credential store, and supplies it only to the child process it starts.
 
-> Stop pasting credentials into `.env` files. Start injecting them via process tree inheritance.
+The legacy `env-pull` binary remains a temporary compatibility alias and prints a migration notice.
 
----
+## Why
 
-## The Problem
+Plaintext `.env` files persist on developer machines, can be committed accidentally, and tend to drift from the approved secret source. `inject` keeps secret values off the project disk while preserving normal development commands through named bindings.
 
-Every development team eventually develops the same bad habit: a plaintext `.env` file that holds production credentials, gets shared over Slack, lives on laptops as-is, and occasionally makes its way into a git commit. Even when teams use a secrets manager, the workflow usually devolves into:
-
-1. Log into the vault UI.
-2. Copy the secret.
-3. Paste it into `.env`.
-4. Hope nobody commits it.
-
-The `.env` file is a liability: it is plaintext, it is persistent, and it is always one `git add .` away from being public.
-
----
-
-## The Solution: Zero-Disk Injection
-
-`inject` is a thin process wrapper. It fetches secrets from your vault at runtime and injects them directly into your target command's environment via OS-level process tree inheritance. The secrets:
-
-- **Never touch the filesystem** as plaintext.
-- **Never appear in logs** or shell history.
-- **Vanish automatically** the moment your process exits — no cleanup required.
-
-<img width="791" height="701" alt="Screenshot 2026-05-27 212844" src="https://github.com/user-attachments/assets/b0e6e0aa-5f78-4b8c-9c4a-d8d31f319add" />
-
----
-
-## Demo
-
-<img width="949" height="461" alt="env-pull-demo-ezgif com-optimize (1)" src="https://github.com/user-attachments/assets/d8b63f16-2c53-4e70-8fdd-03f9e3164b68" />
-
----
-
-### How Does It Compare?
-
-| Feature | `inject` | Traditional `.env` | HashiCorp Vault Agent |
-| :--- | :--- | :--- | :--- |
-| **Plaintext on Disk** | ❌ Never | ❌ Always | ❌ Sometimes (if not strict) |
-| **Setup Time** | ⚡️ < 30 seconds | ⚡️ < 30 seconds | 🐢 Hours / Days |
-| **Requires Code Changes?** | ❌ No (Zero SDKs) | ❌ No | ⚠️ Yes (with SDKs) |
-| **Background Daemon** | ❌ No | ❌ No | ⚠️ Yes |
-
----
+- Secrets are passed only through process environment inheritance.
+- Project configuration is safe to commit: it contains provider references, never values or provider credentials.
+- Remote providers remain the system of record for authentication, authorization, audit history, and rotation.
+- A child process receives a complete validated secret set or does not start.
 
 ## Installation
 
 ### Homebrew (macOS / Linux)
+
 ```bash
 brew tap dynamicHarsh/tap && brew install inject
 ```
 
 ### Scoop (Windows)
+
 ```powershell
-scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install inject
-```
-
-### GitHub Releases
-Download a pre-built binary for your platform from the [Releases](https://github.com/harsh-sonkar/env-pull/releases) page:
-
-```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/inject_latest_darwin_arm64.tar.gz | tar xz
-sudo mv inject /usr/local/bin/
-
-# Linux (amd64)
-curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/inject_latest_linux_amd64.tar.gz | tar xz
-sudo mv inject /usr/local/bin/
+scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket
+scoop install inject
 ```
 
 ### Build from source
+
 ```bash
 git clone https://github.com/harsh-sonkar/env-pull.git
 cd env-pull
-go build -o inject .
+make build
 ```
 
----
+The binary is written to `./bin/inject`.
 
 ## Quick Start
 
-### Option A — Local Encrypted Vault (`inject edit`)
+### Team project: 1Password
 
-Use this when you want a simple, offline-capable, team-shareable workflow where secrets are stored encrypted in your repo or home directory.
+Create a Secure Note in your team's 1Password vault. Its body must use standard `.env` syntax:
 
-**Step 1: Add your secrets**
-```bash
-inject edit
-```
-Your `$EDITOR` opens with a standard `.env`-format file:
 ```dotenv
-# .env.pull.enc (decrypted view — never written to disk as-is)
-DB_PASSWORD=s3cr3t
-API_KEY=abc123
-STRIPE_SECRET_KEY=sk_live_...
+DATABASE_URL=postgres://...
+API_KEY=...
 ```
-Save and exit. The file is re-encrypted with AES-256-GCM and the plaintext is wiped.
 
-**Step 2: Inject at runtime**
+Install and sign in to the 1Password CLI, then run setup from the project root. Setup previews the non-secret configuration before making changes.
+
 ```bash
-# Wrap any command — it sees the secrets as environment variables
-inject run -- ./my-server
-inject run -- npm start
-inject run -- python manage.py runserver
-inject run -- psql --host=localhost mydb
+op signin
+inject setup \
+  --project-id acme-web \
+  --account acme.1password.com \
+  --vault Engineering \
+  --item acme-web-development \
+  --binding dev \
+  --command npm --command run --command dev:app \
+  --yes
 ```
 
-**Step 3: Sync with your team (No cloud required)**
-1. Commit the encrypted `.env.pull.enc` file directly to your Git repository.
-2. Securely share the `master.key` with your team once (e.g., via 1Password, Bitwarden, or Slack).
-3. Everyone places the key in `~/.config/env-pull/master.key`.
+Commit the generated `inject.toml`. Each developer signs in to `op` using their own account, then runs the binding:
 
-Now, your whole team has synchronized secrets, but your Git history remains completely free of plaintext credentials.
-
----
-
-### Option B — AWS Secrets Manager (`--aws-secret`)
-
-Use this for team or CI environments where secrets are managed centrally. No new credentials are needed — `inject` reuses your existing AWS auth context.
-
-**Prerequisites:**
-- AWS credentials configured via any standard method:
-  - `~/.aws/credentials` (shared credentials file)
-  - `AWS_PROFILE` environment variable
-  - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables
-  - EC2 / ECS / EKS IAM instance role
-
-**Store your secret in AWS Secrets Manager as a JSON object:**
-```json
-{
-  "DB_PASSWORD": "s3cr3t",
-  "API_KEY":     "abc123"
-}
-```
-
-**Inject at runtime:**
 ```bash
-inject run --aws-secret prod/my-app -- ./my-server
-inject run --aws-secret prod/my-app -- npm start
-
-# The child process sees DB_PASSWORD and API_KEY as normal env vars
-inject run --aws-secret prod/my-app -- printenv DB_PASSWORD
+inject dev
 ```
 
----
+### Local-only project
 
-## How It Works
+To import an existing `.env` into macOS Keychain or Linux Secret Service, run setup with `--local`:
 
-```
-inject run --aws-secret prod/db -- psql mydb
-      │
-      ├─ 1. Load AWS default credential chain (zero new config)
-      ├─ 2. Call secretsmanager:GetSecretValue("prod/db")
-      ├─ 3. Parse JSON payload → map[string]string in memory
-      ├─ 4. Merge with current environment (no overwrites of existing vars)
-      ├─ 5. exec(psql, env=[...existing..., DB_PASSWORD=s3cr3t, ...])
-      └─ 6. psql exits → memory is reclaimed, secrets are gone
+```bash
+inject setup \
+  --local \
+  --project-id my-app \
+  --binding dev \
+  --command npm --command run --command dev \
+  --yes
 ```
 
-The local vault path is identical, but step 1–3 are replaced by:
-```
-      ├─ 1. Read .env.pull.enc
-      ├─ 2. Decrypt with AES-256-GCM using ~/.config/env-pull/master.key
-      ├─ 3. Parse .env format → map[string]string in memory
-```
+The imported values stay in the operating system credential store. They are not shared through `inject.toml`.
 
----
+### One-off command
 
-## Key Management
+Run any command using the default profile without creating a binding:
 
-The local vault is encrypted with a 32-byte AES-256-GCM key stored at:
-
-```
-~/.config/env-pull/master.key   (permissions: 0600)
-~/.config/env-pull/             (permissions: 0700)
+```bash
+inject run -- npm run db:migrate
+inject run --profile staging -- ./bin/server --check
 ```
 
-The key is generated automatically on the first `inject edit`. **Back it up.**
-Without it, the vault cannot be decrypted.
+Injected values replace same-named variables inherited from the invoking shell. They are not exported back to that shell.
 
----
+## Configuration
+
+`inject.toml` is committed at the project root. It contains no secret values, provider tokens, private item URLs, or developer-specific paths.
+
+```toml
+format_version = 1
+project_id = "acme-web"
+
+[profiles.default]
+provider = "1password"
+account = "acme.1password.com"
+vault = "Engineering"
+item = "acme-web-development"
+item_id = "provider-item-id"
+
+[commands]
+dev = { command = ["npm", "run", "dev:app"] }
+
+[cache]
+enabled = false
+max_age = "24h"
+```
+
+Supported profile providers are `1password`, `bitwarden`, and `local`. A `local` profile needs no provider reference. Provider item IDs take precedence over display names when both are configured.
+
+For a named profile, set the binding's `profile` field:
+
+```toml
+[profiles.staging]
+provider = "bitwarden"
+item = "acme-web-staging"
+
+[commands.staging]
+profile = "staging"
+command = ["npm", "run", "dev"]
+```
+
+## Providers and Offline Use
+
+Remote secret notes are managed only by their provider. `inject` reuses the authenticated session from the relevant CLI:
+
+- 1Password: `op signin`
+- Bitwarden: `bw login`
+
+Normal remote runs always fetch fresh values. You may explicitly enable a credential-store cache in `inject.toml` and request it for offline work:
+
+```toml
+[cache]
+enabled = true
+max_age = "24h"
+```
+
+```bash
+inject run --offline -- npm run dev
+```
+
+Offline use fails when the cache is disabled, unavailable, expired, or used in CI.
 
 ## Command Reference
 
-```
-inject [command]
-
-Commands:
-  edit    Open the encrypted secrets vault in your default editor
-  run     Run a command with vault secrets injected into its environment
-
-Flags:
-  -h, --help   Show help
-
-Run 'inject <command> --help' for detailed usage.
+```text
+inject setup [flags]
+inject <binding>
+inject run [--profile <name>] [--offline] -- <command> [args...]
+inject remove --yes
+inject edit                 # legacy encrypted-vault workflow
+inject export               # legacy encrypted-vault export
 ```
 
----
+- `setup` previews and, with `--yes`, creates or updates configuration and optional command bindings. `--local` imports a legacy `.env` into the credential store. Use `--validate` repeatedly to supply a finite validation command; `--remove-env --yes-remove-env` removes a detected legacy `.env` only after validation.
+- `<binding>` runs a named command from `inject.toml` as an injected foreground child process.
+- `run` injects a selected profile into an arbitrary child command. Place all `inject` flags before the child command.
+- `remove --yes` deletes `inject.toml`, this project's local credential-store values, and remote caches. It never deletes remote provider items.
+- `edit` and `export` remain for compatibility with the former encrypted `.env.pull.enc` workflow. New projects should use `setup` instead.
+
+Run `inject <command> --help` for detailed flags; because `run` passes its arguments through unchanged, use `inject help run` for that command's help.
 
 ## Security Model
 
-| Property              | Guarantee                                                  |
-|-----------------------|------------------------------------------------------------|
-| Disk exposure         | Plaintext secrets never written to disk                    |
-| Log exposure          | Secret values never passed to any logger or stdout         |
-| Memory lifetime       | Byte buffers are zeroed immediately after use              |
-| Temp file wipe        | Editor temp file overwritten with zeros before deletion    |
-| Encryption            | AES-256-GCM with per-message random nonce                  |
-| Key permissions       | Master key stored at 0600; directory at 0700               |
-
-> **Note on physical-layer guarantees:** Zeroing buffers and temp files is
-> best-effort at the software layer. On copy-on-write or log-structured
-> filesystems (APFS, ZFS, most NVMe SSDs), the OS may retain previous data
-> at the hardware level. `inject` mitigates risk at the software layer; it
-> does not make guarantees about physical storage media.
-
----
-
-## No Vendor Lock-In
-
-Decide `inject` isn't for you? Run `inject export > .env` to decrypt your vault back to a standard plaintext file at any time. We don't hold your credentials hostage.
-
----
-
-## Roadmap
-
-- GCP Secret Manager — Coming Soon
-- Azure Key Vault — Coming Soon
-- 1Password CLI — Coming Soon
-- Bitwarden CLI — Coming Soon
-
----
-
-## 🚀 Enterprise Control Plane — Coming Soon
-
-A centralised audit and governance layer is in active development. It will include:
-
-- **Audit logs** — every secret fetch recorded with timestamp, user, and command.
-- **Policy engine** — define which identities can access which secrets in which environments.
-- **Secret rotation hooks** — automatically re-inject rotated credentials without restarting processes.
-- **Team vaults** — shared encrypted vaults with per-member access control.
-- **SSO / OIDC integration** — replace static AWS credentials with short-lived OIDC tokens.
-
-[Sign up for early access →](https://tally.so/r/rjvLXv)
-
----
+| Property | Behavior |
+| --- | --- |
+| Project disk | `inject.toml` contains no secret values. |
+| Environment scope | Secrets are available only to the child process tree. |
+| Parent shell | The invoking shell is never modified. |
+| Provider access | Authentication and authorization stay with 1Password or Bitwarden. |
+| Local values | Stored in macOS Keychain or Linux Secret Service. |
+| Failure mode | Invalid configuration, unavailable source, or malformed secret sets prevent process launch. |
+| Output | Child stdout and stderr pass through unchanged; `inject` does not redact application output. |
 
 ## Contributing
 
 ```bash
-git clone https://github.com/harsh-sonkar/env-pull.git
-cd env-pull
-go test ./...        # run all tests
-make build           # compile to ./bin/inject
-make test            # run tests
+go test ./...
+make build
+make test
 ```
-
----
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
