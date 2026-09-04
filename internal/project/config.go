@@ -96,10 +96,10 @@ func (config Config) validate() error {
 		if !identifier.MatchString(name) {
 			return fmt.Errorf("project: invalid profile name %q", name)
 		}
-		if profile.Provider != "1password" {
-			return fmt.Errorf("project: profile %q provider must be 1password", name)
+		if profile.Provider != "1password" && profile.Provider != "bitwarden" {
+			return fmt.Errorf("project: profile %q provider must be 1password or bitwarden", name)
 		}
-		if strings.TrimSpace(profile.Account) == "" || strings.TrimSpace(profile.Vault) == "" {
+		if profile.Provider == "1password" && (strings.TrimSpace(profile.Account) == "" || strings.TrimSpace(profile.Vault) == "") {
 			return fmt.Errorf("project: profile %q requires account and vault", name)
 		}
 		if strings.TrimSpace(profile.ItemID) == "" && strings.TrimSpace(profile.Item) == "" {

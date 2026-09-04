@@ -20,14 +20,6 @@ type commandRunner interface {
 	Run(context.Context, ...string) ([]byte, error)
 }
 
-type onePasswordRunner struct {
-	path string
-}
-
-func (runner onePasswordRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, runner.path, args...).Output()
-}
-
 type OnePasswordProvider struct {
 	runner commandRunner
 }
@@ -37,7 +29,7 @@ func NewOnePasswordProvider() (*OnePasswordProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("1password: the op CLI is required; install it and run `op signin`")
 	}
-	return newOnePasswordProviderWithRunner(onePasswordRunner{path: path}), nil
+	return newOnePasswordProviderWithRunner(cliRunner{path: path}), nil
 }
 
 func newOnePasswordProviderWithRunner(runner commandRunner) *OnePasswordProvider {
