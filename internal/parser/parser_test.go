@@ -44,14 +44,14 @@ func TestParse(t *testing.T) {
 			want:  map[string]string{"TOKEN": "abc123"},
 		},
 		{
-			name:  "mismatched quotes are kept as-is",
-			input: []byte(`KEY="value'`),
-			want:  map[string]string{"KEY": `"value'`},
+			name:    "mismatched quotes fail closed",
+			input:   []byte(`KEY="value'`),
+			wantErr: true,
 		},
 		{
-			name:  "export prefix is stripped",
-			input: []byte("export MY_VAR=hello\n"),
-			want:  map[string]string{"MY_VAR": "hello"},
+			name:    "export syntax fails closed",
+			input:   []byte("export MY_VAR=hello\n"),
+			wantErr: true,
 		},
 		{
 			name:  "empty value is preserved",
@@ -64,9 +64,9 @@ func TestParse(t *testing.T) {
 			want:  map[string]string{"URL": "https://example.com?a=b&c=d"},
 		},
 		{
-			name:  "line without equals sign is silently skipped",
-			input: []byte("INVALID_LINE\nGOOD=value\n"),
-			want:  map[string]string{"GOOD": "value"},
+			name:    "line without equals sign fails closed",
+			input:   []byte("INVALID_LINE\nGOOD=value\n"),
+			wantErr: true,
 		},
 		{
 			name:  "whitespace around key and value is trimmed",
@@ -82,6 +82,31 @@ func TestParse(t *testing.T) {
 			name:  "only comments and blank lines produces empty map",
 			input: []byte("# comment\n\n# another\n"),
 			want:  map[string]string{},
+		},
+		{
+			name:    "invalid environment key fails closed",
+			input:   []byte("NOT-VALID=value\n"),
+			wantErr: true,
+		},
+		{
+			name:    "duplicate environment key fails closed",
+			input:   []byte("TOKEN=first\nTOKEN=second\n"),
+			wantErr: true,
+		},
+		{
+			name:    "shell expansion fails closed",
+			input:   []byte("TOKEN=${OTHER}\n"),
+			wantErr: true,
+		},
+		{
+			name:    "command substitution fails closed",
+			input:   []byte("TOKEN=$(whoami)\n"),
+			wantErr: true,
+		},
+		{
+			name:    "malformed line fails closed",
+			input:   []byte("TOKEN=value\nthis is malformed\n"),
+			wantErr: true,
 		},
 	}
 

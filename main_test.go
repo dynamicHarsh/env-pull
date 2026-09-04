@@ -39,13 +39,93 @@ func TestCLIIdentity(t *testing.T) {
 			t.Fatalf("legacy invocation = %q, want migration notice", output)
 		}
 
-		legacyCommand := exec.Command(legacyPath, "run", "--", "go", "version")
-		output, err = legacyCommand.CombinedOutput()
-		if err != nil {
-			t.Fatalf("run child through env-pull: %v\n%s", err, output)
-		}
-		if !strings.Contains(string(output), "go version") {
-			t.Fatalf("legacy child output = %q, want go version", output)
-		}
 	})
+}
+
+func TestConfiguredRun(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	config := `format_version = 1
+project_id = "test-project"
+
+[profiles.default]
+provider = "1password"
+account = "acme"
+vault = "Engineering"
+item_id = "stable-note-id"
+
+[commands.show-token]
+profile = "default"
+command = ["sh", "-c", "printf %s \"$TOKEN\""]
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write inject.toml: %v", err)
+	}
+	opPath := filepath.Join(projectDir, "op")
+	op := "#!/bin/sh\nprintf '%s\\n' '{\"fields\":[{\"id\":\"notesPlain\",\"value\":\"TOKEN=from-configured-note\\n\"}]}'\n"
+	if err := os.WriteFile(opPath, []byte(op), 0o700); err != nil {
+		t.Fatalf("write fake op: %v", err)
+	}
+
+	command := exec.Command(binaryPath, "run", "--", "sh", "-c", `printf %s "$TOKEN"`)
+	command.Dir = projectDir
+	command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"), "TOKEN=parent-value")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run configured command: %v\n%s", err, output)
+	}
+	if got := string(output); got != "from-configured-note" {
+		t.Errorf("injected output = %q, want configured secret", got)
+	}
+
+	binding := exec.Command(binaryPath, "show-token")
+	binding.Dir = projectDir
+	binding.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"), "TOKEN=parent-value")
+	output, err = binding.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run configured binding: %v\n%s", err, output)
+	}
+	if got := string(output); got != "from-configured-note" {
+		t.Errorf("bound command output = %q, want configured secret", got)
+	}
+}
+
+func TestConfiguredRunDoesNotLaunchChildWhenSourceFails(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	config := `format_version = 1
+project_id = "test-project"
+[profiles.default]
+provider = "1password"
+account = "acme"
+vault = "Engineering"
+item_id = "stable-note-id"
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write inject.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "op"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write failing fake op: %v", err)
+	}
+	sentinel := filepath.Join(projectDir, "child-was-launched")
+
+	command := exec.Command(binaryPath, "run", "--", "sh", "-c", "touch \"$1\"", "sh", sentinel)
+	command.Dir = projectDir
+	command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("run configured command = success, want source failure; output: %s", output)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("child launch sentinel stat error = %v, want not exist", err)
+	}
 }

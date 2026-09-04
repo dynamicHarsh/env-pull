@@ -5,6 +5,7 @@ go 1.26.2
 require github.com/spf13/cobra v1.10.2
 
 require (
+	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.18 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17 // indirect

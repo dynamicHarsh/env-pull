@@ -4,9 +4,12 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/harsh-sonkar/env-pull/internal/project"
 )
 
 // rootCmd is the base command for the inject CLI.
@@ -29,7 +32,33 @@ invoking shell. Use inject run for one-off commands.`,
 // Execute is the single entry point called by main. It runs the root command
 // and exits with a non-zero status code on any error.
 func Execute() {
+	registerBindings()
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+func registerBindings() {
+	config, err := project.Find()
+	if err != nil {
+		return
+	}
+	for name, binding := range config.Commands {
+		binding := binding
+		rootCmd.AddCommand(&cobra.Command{
+			Use:   name,
+			Short: "Run the configured " + name + " command",
+			Args:  cobra.NoArgs,
+			RunE: func(_ *cobra.Command, _ []string) error {
+				secrets, err := loadProfileSecrets(binding.Profile)
+				if err != nil {
+					return err
+				}
+				if err := runChild(binding.Command, secrets); err != nil {
+					return fmt.Errorf("%s: %w", name, err)
+				}
+				return nil
+			},
+		})
 	}
 }
