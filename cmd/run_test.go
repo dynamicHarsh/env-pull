@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,8 +244,8 @@ item_id = "stable-note-id"
 		t.Fatal(err)
 	}
 
-	if err := removeProject(directory, credentialStore); err != nil {
-		t.Fatalf("removeProject() error = %v", err)
+	if err := runRemove(directory, credentialStore, true, io.Discard); err != nil {
+		t.Fatalf("runRemove() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(directory, project.FileName)); !os.IsNotExist(err) {
 		t.Errorf("inject.toml stat error = %v, want deleted", err)
@@ -254,4 +258,107 @@ item_id = "stable-note-id"
 	if _, _, err := credentialStore.GetCache("billing-api", "remote"); err == nil {
 		t.Error("remote cache remains available")
 	}
+}
+
+func TestRunRemovePreviewsAndCancelsWithoutChangingLocalState(t *testing.T) {
+	directory := t.TempDir()
+	config := `format_version = 1
+project_id = "billing-api"
+
+[profiles.local]
+provider = "local"
+
+[profiles.remote]
+provider = "bitwarden"
+item_id = "stable-note-id"
+`
+	if err := os.WriteFile(filepath.Join(directory, project.FileName), []byte(config), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credentialStore := store.NewMemory()
+	if err := credentialStore.Put("billing-api", "local", map[string]string{"TOKEN": "local-value"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.PutCache("billing-api", "remote", map[string]string{"TOKEN": "cached-value"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	err := runRemove(directory, credentialStore, false, &output)
+	if err == nil {
+		t.Fatal("runRemove() error = nil, want confirmation error")
+	}
+	if got := output.String(); !containsAll(got, "inject.toml", "local credential-store entry for profile \"local\"", "remote cache for profile \"remote\"") || containsAny(got, "local-value", "cached-value") {
+		t.Errorf("preview = %q, want non-secret local state", got)
+	}
+	if _, err := os.Stat(filepath.Join(directory, project.FileName)); err != nil {
+		t.Errorf("inject.toml stat error = %v, want configuration preserved", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "local"); err != nil {
+		t.Errorf("local profile unavailable after cancellation: %v", err)
+	}
+	if _, _, err := credentialStore.GetCache("billing-api", "remote"); err != nil {
+		t.Errorf("remote cache unavailable after cancellation: %v", err)
+	}
+}
+
+func TestRunRemoveFailurePreservesConfigurationAndOtherProjects(t *testing.T) {
+	directory := t.TempDir()
+	config := `format_version = 1
+project_id = "billing-api"
+
+[profiles.local]
+provider = "local"
+`
+	if err := os.WriteFile(filepath.Join(directory, project.FileName), []byte(config), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	credentialStore := &failingDeleteStore{Store: store.NewMemory()}
+	if err := credentialStore.Put("billing-api", "local", map[string]string{"TOKEN": "local-value"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.Put("other-project", "local", map[string]string{"TOKEN": "other-value"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	err := runRemove(directory, credentialStore, true, &output)
+	if err == nil || strings.Contains(err.Error(), "local-value") {
+		t.Fatalf("runRemove() error = %v, want non-secret deletion failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, project.FileName)); err != nil {
+		t.Errorf("inject.toml stat error = %v, want configuration preserved", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "local"); err != nil {
+		t.Errorf("local profile unavailable after failed removal: %v", err)
+	}
+	if _, err := credentialStore.Get("other-project", "local"); err != nil {
+		t.Errorf("other project profile unavailable after failed removal: %v", err)
+	}
+}
+
+type failingDeleteStore struct {
+	store.Store
+}
+
+func (store *failingDeleteStore) Delete(string, string) error {
+	return errors.New("credential store unavailable")
+}
+
+func containsAll(value string, substrings ...string) bool {
+	for _, substring := range substrings {
+		if !strings.Contains(value, substring) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAny(value string, substrings ...string) bool {
+	for _, substring := range substrings {
+		if strings.Contains(value, substring) {
+			return true
+		}
+	}
+	return false
 }
