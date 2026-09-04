@@ -16,13 +16,13 @@ var exportCmd = &cobra.Command{
 
 The intended usage is to pipe the output into a file:
 
-  env-pull export > .env
+	inject export > .env
 
-This is an escape hatch — if you decide env-pull is not for you, this
+This is an escape hatch — if you decide inject is not for you, this
 command lets you recover a standard plaintext .env file at any time.
 No credentials are held hostage.
 
-Nothing is written to disk by env-pull itself; the shell redirection
+Nothing is written to disk by inject itself; the shell redirection
 (> .env) is entirely under your control.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

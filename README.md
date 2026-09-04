@@ -1,6 +1,8 @@
-# env-pull
+# inject
 
-**A zero-disk, zero-config CLI that securely injects secrets into your app at runtime—killing the plaintext `.env` file forever.**
+**A zero-disk CLI that injects secrets into your app at runtime.**
+
+`inject` is the primary command. `env-pull` remains a temporary compatibility alias and prints a migration notice.
 
 > Stop pasting credentials into `.env` files. Start injecting them via process tree inheritance.
 
@@ -21,7 +23,7 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ## The Solution: Zero-Disk Injection
 
-`env-pull` is a thin process wrapper. It fetches secrets from your vault at runtime and injects them directly into your target command's environment via OS-level process tree inheritance. The secrets:
+`inject` is a thin process wrapper. It fetches secrets from your vault at runtime and injects them directly into your target command's environment via OS-level process tree inheritance. The secrets:
 
 - **Never touch the filesystem** as plaintext.
 - **Never appear in logs** or shell history.
@@ -39,7 +41,7 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ### How Does It Compare?
 
-| Feature | `env-pull` | Traditional `.env` | HashiCorp Vault Agent |
+| Feature | `inject` | Traditional `.env` | HashiCorp Vault Agent |
 | :--- | :--- | :--- | :--- |
 | **Plaintext on Disk** | ❌ Never | ❌ Always | ❌ Sometimes (if not strict) |
 | **Setup Time** | ⚡️ < 30 seconds | ⚡️ < 30 seconds | 🐢 Hours / Days |
@@ -52,12 +54,12 @@ The `.env` file is a liability: it is plaintext, it is persistent, and it is alw
 
 ### Homebrew (macOS / Linux)
 ```bash
-brew tap dynamicHarsh/tap && brew install env-pull
+brew tap dynamicHarsh/tap && brew install inject
 ```
 
 ### Scoop (Windows)
 ```powershell
-scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install env-pull
+scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install inject
 ```
 
 ### GitHub Releases
@@ -65,32 +67,32 @@ Download a pre-built binary for your platform from the [Releases](https://github
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/env-pull_latest_darwin_arm64.tar.gz | tar xz
-sudo mv env-pull /usr/local/bin/
+curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/inject_latest_darwin_arm64.tar.gz | tar xz
+sudo mv inject /usr/local/bin/
 
 # Linux (amd64)
-curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/env-pull_latest_linux_amd64.tar.gz | tar xz
-sudo mv env-pull /usr/local/bin/
+curl -L https://github.com/harsh-sonkar/env-pull/releases/latest/download/inject_latest_linux_amd64.tar.gz | tar xz
+sudo mv inject /usr/local/bin/
 ```
 
 ### Build from source
 ```bash
 git clone https://github.com/harsh-sonkar/env-pull.git
 cd env-pull
-go build -o env-pull .
+go build -o inject .
 ```
 
 ---
 
 ## Quick Start
 
-### Option A — Local Encrypted Vault (`env-pull edit`)
+### Option A — Local Encrypted Vault (`inject edit`)
 
 Use this when you want a simple, offline-capable, team-shareable workflow where secrets are stored encrypted in your repo or home directory.
 
 **Step 1: Add your secrets**
 ```bash
-env-pull edit
+inject edit
 ```
 Your `$EDITOR` opens with a standard `.env`-format file:
 ```dotenv
@@ -104,10 +106,10 @@ Save and exit. The file is re-encrypted with AES-256-GCM and the plaintext is wi
 **Step 2: Inject at runtime**
 ```bash
 # Wrap any command — it sees the secrets as environment variables
-env-pull run -- ./my-server
-env-pull run -- npm start
-env-pull run -- python manage.py runserver
-env-pull run -- psql --host=localhost mydb
+inject run -- ./my-server
+inject run -- npm start
+inject run -- python manage.py runserver
+inject run -- psql --host=localhost mydb
 ```
 
 **Step 3: Sync with your team (No cloud required)**
@@ -121,7 +123,7 @@ Now, your whole team has synchronized secrets, but your Git history remains comp
 
 ### Option B — AWS Secrets Manager (`--aws-secret`)
 
-Use this for team or CI environments where secrets are managed centrally. No new credentials are needed — `env-pull` reuses your existing AWS auth context.
+Use this for team or CI environments where secrets are managed centrally. No new credentials are needed — `inject` reuses your existing AWS auth context.
 
 **Prerequisites:**
 - AWS credentials configured via any standard method:
@@ -140,11 +142,11 @@ Use this for team or CI environments where secrets are managed centrally. No new
 
 **Inject at runtime:**
 ```bash
-env-pull run --aws-secret prod/my-app -- ./my-server
-env-pull run --aws-secret prod/my-app -- npm start
+inject run --aws-secret prod/my-app -- ./my-server
+inject run --aws-secret prod/my-app -- npm start
 
 # The child process sees DB_PASSWORD and API_KEY as normal env vars
-env-pull run --aws-secret prod/my-app -- printenv DB_PASSWORD
+inject run --aws-secret prod/my-app -- printenv DB_PASSWORD
 ```
 
 ---
@@ -152,7 +154,7 @@ env-pull run --aws-secret prod/my-app -- printenv DB_PASSWORD
 ## How It Works
 
 ```
-env-pull run --aws-secret prod/db -- psql mydb
+inject run --aws-secret prod/db -- psql mydb
       │
       ├─ 1. Load AWS default credential chain (zero new config)
       ├─ 2. Call secretsmanager:GetSecretValue("prod/db")
@@ -180,7 +182,7 @@ The local vault is encrypted with a 32-byte AES-256-GCM key stored at:
 ~/.config/env-pull/             (permissions: 0700)
 ```
 
-The key is generated automatically on the first `env-pull edit`. **Back it up.**
+The key is generated automatically on the first `inject edit`. **Back it up.**
 Without it, the vault cannot be decrypted.
 
 ---
@@ -188,7 +190,7 @@ Without it, the vault cannot be decrypted.
 ## Command Reference
 
 ```
-env-pull [command]
+inject [command]
 
 Commands:
   edit    Open the encrypted secrets vault in your default editor
@@ -197,7 +199,7 @@ Commands:
 Flags:
   -h, --help   Show help
 
-Run 'env-pull <command> --help' for detailed usage.
+Run 'inject <command> --help' for detailed usage.
 ```
 
 ---
@@ -216,14 +218,14 @@ Run 'env-pull <command> --help' for detailed usage.
 > **Note on physical-layer guarantees:** Zeroing buffers and temp files is
 > best-effort at the software layer. On copy-on-write or log-structured
 > filesystems (APFS, ZFS, most NVMe SSDs), the OS may retain previous data
-> at the hardware level. `env-pull` mitigates risk at the software layer; it
+> at the hardware level. `inject` mitigates risk at the software layer; it
 > does not make guarantees about physical storage media.
 
 ---
 
 ## No Vendor Lock-In
 
-Decide `env-pull` isn't for you? Run `env-pull export > .env` to decrypt your vault back to a standard plaintext file at any time. We don't hold your credentials hostage.
+Decide `inject` isn't for you? Run `inject export > .env` to decrypt your vault back to a standard plaintext file at any time. We don't hold your credentials hostage.
 
 ---
 
@@ -256,7 +258,7 @@ A centralised audit and governance layer is in active development. It will inclu
 git clone https://github.com/harsh-sonkar/env-pull.git
 cd env-pull
 go test ./...        # run all tests
-make build           # compile to ./bin/env-pull
+make build           # compile to ./bin/inject
 make test            # run tests
 ```
 

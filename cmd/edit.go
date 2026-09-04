@@ -23,15 +23,15 @@ secrets in standard .env format, one KEY=VALUE pair per line:
 
   DB_PASSWORD=s3cr3t
   API_KEY=abc123
-  # This is a comment — ignored by env-pull run
+	# This is a comment — ignored by inject run
 
 ZERO-DISK GUARANTEE
   The plaintext is written to a temporary file only for the duration of your
-  editing session. When the editor exits, env-pull overwrites that file with
+	editing session. When the editor exits, inject overwrites that file with
   zeros before deleting it, limiting the chance of plaintext lingering on disk.
 
 EDITOR SELECTION
-  env-pull respects the $EDITOR environment variable. If it is not set, vim
+	inject respects the $EDITOR environment variable. If it is not set, vim
   is used on Linux/macOS and notepad.exe on Windows. Multi-word values are
   supported (e.g. EDITOR="code --wait").
 
