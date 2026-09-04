@@ -28,3 +28,23 @@ func TestMemoryStoreScopesSecretSetsByProjectAndProfile(t *testing.T) {
 		t.Error("Get() error = nil for another profile, want unavailable secret set")
 	}
 }
+
+func TestMemoryStoreDeletesOnlyRequestedSecretSet(t *testing.T) {
+	credentialStore := store.NewMemory()
+	if err := credentialStore.Put("billing-api", "default", map[string]string{"TOKEN": "local-value"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialStore.Put("billing-api", "staging", map[string]string{"TOKEN": "staging-value"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := credentialStore.Delete("billing-api", "default"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
+		t.Error("deleted profile remains available")
+	}
+	if _, err := credentialStore.Get("billing-api", "staging"); err != nil {
+		t.Errorf("other profile was deleted: %v", err)
+	}
+}

@@ -12,6 +12,7 @@ import (
 type Store interface {
 	Put(projectID, profile string, secrets map[string]string) error
 	Get(projectID, profile string) (map[string]string, error)
+	Delete(projectID, profile string) error
 }
 
 // ErrUnavailable reports a missing local secret set without exposing values.
@@ -54,6 +55,13 @@ func (store *System) Get(projectID, profile string) (map[string]string, error) {
 	return secrets, nil
 }
 
+func (store *System) Delete(projectID, profile string) error {
+	if err := keyring.Delete(serviceName, entryName(projectID, profile)); err != nil {
+		return fmt.Errorf("credential store: delete secret set: %w", err)
+	}
+	return nil
+}
+
 func NewMemory() *Memory {
 	return &Memory{sets: make(map[string]map[string]map[string]string)}
 }
@@ -72,6 +80,21 @@ func (store *Memory) Get(projectID, profile string) (map[string]string, error) {
 		return nil, ErrUnavailable
 	}
 	return copySecrets(secrets), nil
+}
+
+func (store *Memory) Delete(projectID, profile string) error {
+	profiles, exists := store.sets[projectID]
+	if !exists {
+		return ErrUnavailable
+	}
+	if _, exists := profiles[profile]; !exists {
+		return ErrUnavailable
+	}
+	delete(profiles, profile)
+	if len(profiles) == 0 {
+		delete(store.sets, projectID)
+	}
+	return nil
 }
 
 func copySecrets(secrets map[string]string) map[string]string {
