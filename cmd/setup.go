@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	setupworkflow "github.com/harsh-sonkar/env-pull/internal/setup"
+	"github.com/harsh-sonkar/env-pull/internal/store"
 )
 
 var (
@@ -18,6 +19,7 @@ var (
 	setupPackageScript    string
 	setupCommand          []string
 	setupValidation       []string
+	setupLocal            bool
 	setupConfirm          bool
 	setupRemoveLegacyEnv  bool
 	setupConfirmRemoveEnv bool
@@ -44,6 +46,8 @@ only after validation to delete a detected legacy .env file.`,
 			PackageScript:    setupPackageScript,
 			Command:          setupCommand,
 			Validate:         setupValidation,
+			Local:            setupLocal,
+			Store:            store.NewSystem(),
 			Confirm:          setupConfirm,
 			RemoveLegacyEnv:  setupRemoveLegacyEnv,
 			ConfirmRemoveEnv: setupConfirmRemoveEnv,
@@ -62,6 +66,7 @@ func init() {
 	setupCmd.Flags().StringVar(&setupPackageScript, "package-script", "", "package.json script to bind when safe")
 	setupCmd.Flags().StringArrayVar(&setupCommand, "command", nil, "binding command argument; repeat for each argument")
 	setupCmd.Flags().StringArrayVar(&setupValidation, "validate", nil, "finite validation command argument; repeat for each argument")
+	setupCmd.Flags().BoolVar(&setupLocal, "local", false, "import a legacy .env into the local credential store")
 	setupCmd.Flags().BoolVar(&setupConfirm, "yes", false, "apply the previewed project changes")
 	setupCmd.Flags().BoolVar(&setupRemoveLegacyEnv, "remove-env", false, "remove a legacy .env after validation")
 	setupCmd.Flags().BoolVar(&setupConfirmRemoveEnv, "yes-remove-env", false, "confirm removal of a legacy .env")

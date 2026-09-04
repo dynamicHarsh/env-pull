@@ -34,6 +34,22 @@ command = ["go", "run", "."]
 	}
 }
 
+func TestParseAcceptsBitwardenProfile(t *testing.T) {
+	config, err := project.Parse([]byte(`format_version = 1
+project_id = "billing-api"
+
+[profiles.default]
+provider = "bitwarden"
+item_id = "abc123"
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if config.Profiles["default"].Provider != "bitwarden" {
+		t.Errorf("provider = %q, want bitwarden", config.Profiles["default"].Provider)
+	}
+}
+
 func TestParseRejectsUnsafeOrAmbiguousConfiguration(t *testing.T) {
 	tests := []struct {
 		name  string

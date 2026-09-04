@@ -95,6 +95,50 @@ command = ["sh", "-c", "printf %s \"$TOKEN\""]
 	}
 }
 
+func TestConfiguredBitwardenRun(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	config := `format_version = 1
+project_id = "test-project"
+
+[profiles.default]
+provider = "bitwarden"
+item_id = "stable-note-id"
+
+[commands.show-token]
+profile = "default"
+command = ["sh", "-c", "printf %s \"$TOKEN\""]
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write inject.toml: %v", err)
+	}
+	bw := "#!/bin/sh\nif [ \"$BW_SESSION\" != \"ci-session\" ]; then exit 1; fi\nprintf 'TOKEN=from-bitwarden-note\\n'\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "bw"), []byte(bw), 0o700); err != nil {
+		t.Fatalf("write fake bw: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"run", "--", "sh", "-c", `printf %s "$TOKEN"`},
+		{"show-token"},
+	} {
+		command := exec.Command(binaryPath, args...)
+		command.Dir = projectDir
+		command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"), "BW_SESSION=ci-session", "TOKEN=parent-value")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("run %q: %v\n%s", args, err, output)
+		}
+		if got := string(output); got != "from-bitwarden-note" {
+			t.Errorf("run %q output = %q, want injected Bitwarden secret", args, got)
+		}
+	}
+}
+
 func TestConfiguredRunDoesNotLaunchChildWhenSourceFails(t *testing.T) {
 	binaryPath := filepath.Join(t.TempDir(), "inject")
 	build := exec.Command("go", "build", "-o", binaryPath, ".")
@@ -116,6 +160,39 @@ item_id = "stable-note-id"
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "op"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("write failing fake op: %v", err)
+	}
+	sentinel := filepath.Join(projectDir, "child-was-launched")
+
+	command := exec.Command(binaryPath, "run", "--", "sh", "-c", "touch \"$1\"", "sh", sentinel)
+	command.Dir = projectDir
+	command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("run configured command = success, want source failure; output: %s", output)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("child launch sentinel stat error = %v, want not exist", err)
+	}
+}
+
+func TestConfiguredBitwardenRunDoesNotLaunchChildWhenSourceFails(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	config := `format_version = 1
+project_id = "test-project"
+[profiles.default]
+provider = "bitwarden"
+item_id = "stable-note-id"
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write inject.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "bw"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write failing fake bw: %v", err)
 	}
 	sentinel := filepath.Join(projectDir, "child-was-launched")
 

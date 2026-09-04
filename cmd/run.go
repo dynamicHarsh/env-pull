@@ -12,6 +12,7 @@ import (
 
 	"github.com/harsh-sonkar/env-pull/internal/executor"
 	"github.com/harsh-sonkar/env-pull/internal/project"
+	"github.com/harsh-sonkar/env-pull/internal/store"
 	"github.com/harsh-sonkar/env-pull/internal/vaults"
 )
 
@@ -25,9 +26,9 @@ then spawns your target command as a transparent child process with those
 secrets present in its environment. The child sees them as ordinary env vars;
 they vanish when it exits. Nothing is written to disk.
 
-The default profile is selected unless --profile names another configured
-1Password secret note. inject reuses the existing op CLI session; run
-op signin before retrying when it reports an unavailable session.
+The default profile is selected unless --profile names another configured remote
+secret note. inject reuses the existing provider CLI session; run op signin or
+bw login before retrying when it reports an unavailable session.
 
 USAGE EXAMPLES
 
@@ -107,16 +108,43 @@ func loadProfileSecrets(profileName string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run: %w", err)
 	}
-	provider, err := vaults.NewOnePasswordProvider()
-	if err != nil {
-		return nil, fmt.Errorf("run: %w", err)
+	switch profile.Provider {
+	case "local":
+		return loadLocalProfileSecrets(config, profileName, store.NewSystem())
+	case "1password":
+		provider, err := vaults.NewOnePasswordProvider()
+		if err != nil {
+			return nil, fmt.Errorf("run: %w", err)
+		}
+		return provider.Fetch(context.Background(), vaults.OnePasswordReference{
+			Account: profile.Account,
+			Vault:   profile.Vault,
+			ItemID:  profile.ItemID,
+			Item:    profile.Item,
+		})
+	case "bitwarden":
+		provider, err := vaults.NewBitwardenProvider()
+		if err != nil {
+			return nil, fmt.Errorf("run: %w", err)
+		}
+		return provider.Fetch(context.Background(), vaults.BitwardenReference{
+			ItemID: profile.ItemID,
+			Item:   profile.Item,
+		})
+	default:
+		return nil, fmt.Errorf("run: unsupported provider %q", profile.Provider)
 	}
-	return provider.Fetch(context.Background(), vaults.OnePasswordReference{
-		Account: profile.Account,
-		Vault:   profile.Vault,
-		ItemID:  profile.ItemID,
-		Item:    profile.Item,
-	})
+}
+
+func loadLocalProfileSecrets(config project.Config, profileName string, credentialStore store.Store) (map[string]string, error) {
+	if profileName == "" {
+		profileName = "default"
+	}
+	secrets, err := credentialStore.Get(config.ProjectID, profileName)
+	if err != nil {
+		return nil, fmt.Errorf("run: local secret set is unavailable")
+	}
+	return secrets, nil
 }
 
 func init() {
