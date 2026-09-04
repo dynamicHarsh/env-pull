@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,10 +17,12 @@ import (
 	"github.com/harsh-sonkar/env-pull/internal/vaults"
 )
 
+var newCredentialStore = func() store.Store { return store.NewSystem() }
+
 // runCmd is intentionally thin: it resolves secrets from the appropriate
 // backend, then delegates all execution to executor.RunCommand.
 var runCmd = &cobra.Command{
-	Use:   "run [--profile <name>] -- <command> [args...]",
+	Use:   "run [--profile <name>] [--offline] -- <command> [args...]",
 	Short: "Run a command with configured secrets injected into its environment",
 	Long: `run is the core command of inject. It resolves secrets from inject.toml,
 then spawns your target command as a transparent child process with those
@@ -45,7 +48,7 @@ after the child binary name are passed through unchanged, including flags
 that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 
 	// DisableFlagParsing passes all arguments through to the child command
-	// unchanged. Our own --aws-secret flag is extracted manually before dispatch.
+	// unchanged. Our own flags are extracted manually before dispatch.
 	DisableFlagParsing: true,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,7 +56,7 @@ that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 			return fmt.Errorf("run: a command to execute is required")
 		}
 
-		profileName, childArgs := extractProfileFlag(args)
+		profileName, offline, childArgs := extractRunFlags(args)
 		if len(childArgs) > 0 && childArgs[0] == "--" {
 			childArgs = childArgs[1:]
 		}
@@ -61,7 +64,7 @@ that look like -x or --flag (flag parsing is disabled for this subcommand).`,
 			return fmt.Errorf("run: a command to execute is required after --profile")
 		}
 
-		secrets, err := loadProfileSecrets(profileName)
+		secrets, err := loadProfileSecrets(profileName, offline)
 		if err != nil {
 			return err
 		}
@@ -81,8 +84,8 @@ func runChild(command []string, secrets map[string]string) error {
 	return nil
 }
 
-// extractProfileFlag scans args for --profile <value> or --profile=<value>.
-func extractProfileFlag(args []string) (profileName string, remaining []string) {
+// extractRunFlags scans args for inject's flags before passing the rest to the child.
+func extractRunFlags(args []string) (profileName string, offline bool, remaining []string) {
 	remaining = make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--profile" && i+1 < len(args) {
@@ -94,12 +97,16 @@ func extractProfileFlag(args []string) (profileName string, remaining []string) 
 			profileName = after
 			continue
 		}
+		if args[i] == "--offline" {
+			offline = true
+			continue
+		}
 		remaining = append(remaining, args[i])
 	}
 	return
 }
 
-func loadProfileSecrets(profileName string) (map[string]string, error) {
+func loadProfileSecrets(profileName string, offline bool) (map[string]string, error) {
 	config, err := project.Find()
 	if err != nil {
 		return nil, fmt.Errorf("run: %w", err)
@@ -110,30 +117,67 @@ func loadProfileSecrets(profileName string) (map[string]string, error) {
 	}
 	switch profile.Provider {
 	case "local":
-		return loadLocalProfileSecrets(config, profileName, store.NewSystem())
+		return loadLocalProfileSecrets(config, profileName, newCredentialStore())
 	case "1password":
-		provider, err := vaults.NewOnePasswordProvider()
-		if err != nil {
-			return nil, fmt.Errorf("run: %w", err)
-		}
-		return provider.Fetch(context.Background(), vaults.OnePasswordReference{
-			Account: profile.Account,
-			Vault:   profile.Vault,
-			ItemID:  profile.ItemID,
-			Item:    profile.Item,
+		return loadRemoteProfileSecrets(config, profileName, offline, newCredentialStore(), isCI(), time.Now(), func() (map[string]string, error) {
+			provider, err := vaults.NewOnePasswordProvider()
+			if err != nil {
+				return nil, fmt.Errorf("run: %w", err)
+			}
+			return provider.Fetch(context.Background(), vaults.OnePasswordReference{
+				Account: profile.Account,
+				Vault:   profile.Vault,
+				ItemID:  profile.ItemID,
+				Item:    profile.Item,
+			})
 		})
 	case "bitwarden":
-		provider, err := vaults.NewBitwardenProvider()
-		if err != nil {
-			return nil, fmt.Errorf("run: %w", err)
-		}
-		return provider.Fetch(context.Background(), vaults.BitwardenReference{
-			ItemID: profile.ItemID,
-			Item:   profile.Item,
+		return loadRemoteProfileSecrets(config, profileName, offline, newCredentialStore(), isCI(), time.Now(), func() (map[string]string, error) {
+			provider, err := vaults.NewBitwardenProvider()
+			if err != nil {
+				return nil, fmt.Errorf("run: %w", err)
+			}
+			return provider.Fetch(context.Background(), vaults.BitwardenReference{
+				ItemID: profile.ItemID,
+				Item:   profile.Item,
+			})
 		})
 	default:
 		return nil, fmt.Errorf("run: unsupported provider %q", profile.Provider)
 	}
+}
+
+func loadRemoteProfileSecrets(config project.Config, profileName string, offline bool, credentialStore store.Store, ci bool, now time.Time, fetch func() (map[string]string, error)) (map[string]string, error) {
+	if profileName == "" {
+		profileName = "default"
+	}
+	if offline {
+		if ci || !config.Cache.Enabled {
+			return nil, fmt.Errorf("run: offline remote cache is unavailable")
+		}
+		secrets, cachedAt, err := credentialStore.GetCache(config.ProjectID, profileName)
+		cacheAge := now.Sub(cachedAt)
+		if err != nil || cacheAge < 0 || cacheAge >= config.Cache.MaxAge.Duration {
+			return nil, fmt.Errorf("run: offline remote cache is unavailable")
+		}
+		return secrets, nil
+	}
+
+	secrets, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	if config.Cache.Enabled && !ci {
+		if err := credentialStore.PutCache(config.ProjectID, profileName, secrets, now); err != nil {
+			return nil, fmt.Errorf("run: remote cache is unavailable")
+		}
+	}
+	return secrets, nil
+}
+
+func isCI() bool {
+	_, present := os.LookupEnv("CI")
+	return present
 }
 
 func loadLocalProfileSecrets(config project.Config, profileName string, credentialStore store.Store) (map[string]string, error) {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -19,8 +20,29 @@ var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 type Config struct {
 	FormatVersion int                `toml:"format_version"`
 	ProjectID     string             `toml:"project_id"`
+	Cache         CachePolicy        `toml:"cache"`
 	Profiles      map[string]Profile `toml:"profiles"`
 	Commands      map[string]Binding `toml:"commands"`
+}
+
+type CachePolicy struct {
+	Enabled bool     `toml:"enabled"`
+	MaxAge  Duration `toml:"max_age"`
+}
+
+type Duration struct {
+	time.Duration
+	set bool
+}
+
+func (duration *Duration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	duration.Duration = parsed
+	duration.set = true
+	return nil
 }
 
 type Profile struct {
@@ -82,7 +104,7 @@ func (config Config) Binding(name string) (Binding, error) {
 	return binding, nil
 }
 
-func (config Config) validate() error {
+func (config *Config) validate() error {
 	if config.FormatVersion != 1 {
 		return fmt.Errorf("project: format_version must be 1")
 	}
@@ -91,6 +113,12 @@ func (config Config) validate() error {
 	}
 	if len(config.Profiles) == 0 {
 		return fmt.Errorf("project: at least one profile is required")
+	}
+	if config.Cache.Enabled && !config.Cache.MaxAge.set {
+		config.Cache.MaxAge.Duration = 24 * time.Hour
+	}
+	if config.Cache.MaxAge.set && config.Cache.MaxAge.Duration <= 0 {
+		return fmt.Errorf("project: cache max_age must be positive")
 	}
 	for name, profile := range config.Profiles {
 		if !identifier.MatchString(name) {
