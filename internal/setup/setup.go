@@ -15,7 +15,9 @@ import (
 	"unicode"
 
 	"github.com/harsh-sonkar/env-pull/internal/executor"
+	"github.com/harsh-sonkar/env-pull/internal/parser"
 	"github.com/harsh-sonkar/env-pull/internal/project"
+	"github.com/harsh-sonkar/env-pull/internal/store"
 	"github.com/harsh-sonkar/env-pull/internal/vaults"
 )
 
@@ -32,11 +34,13 @@ type Request struct {
 	Command          []string
 	PackageScript    string
 	Validate         []string
+	Local            bool
 	Confirm          bool
 	RemoveLegacyEnv  bool
 	ConfirmRemoveEnv bool
 	CheckOnePassword func() error
 	RunValidation    func([]string) error
+	Store            store.Store
 	Output           io.Writer
 }
 
@@ -51,9 +55,11 @@ func Run(request Request) error {
 	if err := validateRequest(request); err != nil {
 		return err
 	}
-	if err := checkOnePassword(request); err != nil {
-		fmt.Fprintln(request.Output, "1Password is unavailable; run `op signin` and retry")
-		return err
+	if !request.Local {
+		if err := checkOnePassword(request); err != nil {
+			fmt.Fprintln(request.Output, "1Password is unavailable; run `op signin` and retry")
+			return err
+		}
 	}
 	if _, exists := statFile(filepath.Join(request.Directory, project.FileName)); exists {
 		return fmt.Errorf("setup: inject.toml already exists")
@@ -88,6 +94,20 @@ func Run(request Request) error {
 	if err := validateValidationCommand(request.Validate); err != nil {
 		return err
 	}
+	var localSecrets map[string]string
+	if request.Local {
+		if request.Store == nil {
+			return fmt.Errorf("setup: local credential store is unavailable")
+		}
+		data, err := os.ReadFile(legacyEnvPath)
+		if err != nil {
+			return fmt.Errorf("setup: read legacy .env: %w", err)
+		}
+		localSecrets, err = parser.Parse(data)
+		if err != nil {
+			return fmt.Errorf("setup: import legacy .env: %w", err)
+		}
+	}
 
 	if err := os.WriteFile(filepath.Join(request.Directory, project.FileName), configData, 0o644); err != nil {
 		return fmt.Errorf("setup: write inject.toml: %w", err)
@@ -97,8 +117,13 @@ func Run(request Request) error {
 			return fmt.Errorf("setup: update package.json: %w", err)
 		}
 	}
-	if err := runValidation(request); err != nil {
+	if err := runValidation(request, localSecrets); err != nil {
 		return fmt.Errorf("setup: validation failed: %w", err)
+	}
+	if request.Local {
+		if err := request.Store.Put(request.ProjectID, "default", localSecrets); err != nil {
+			return fmt.Errorf("setup: save local secret set: %w", err)
+		}
 	}
 	fmt.Fprintln(request.Output, "Validation succeeded")
 	if request.RemoveLegacyEnv && legacyEnvExists {
@@ -115,7 +140,13 @@ func Run(request Request) error {
 }
 
 func validateRequest(request Request) error {
-	if strings.TrimSpace(request.ProjectID) == "" || strings.TrimSpace(request.Account) == "" || strings.TrimSpace(request.Vault) == "" {
+	if strings.TrimSpace(request.ProjectID) == "" {
+		return fmt.Errorf("setup: project ID is required")
+	}
+	if request.Local {
+		return nil
+	}
+	if strings.TrimSpace(request.Account) == "" || strings.TrimSpace(request.Vault) == "" {
 		return fmt.Errorf("setup: project ID, 1Password account, and vault are required")
 	}
 	if strings.TrimSpace(request.ItemID) == "" && strings.TrimSpace(request.Item) == "" {
@@ -145,13 +176,17 @@ func checkOnePassword(request Request) error {
 }
 
 func plan(request Request) (project.Config, []byte, error) {
+	profile := project.Profile{
+		Provider: "1password", Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
+	}
+	if request.Local {
+		profile = project.Profile{Provider: "local"}
+	}
 	config := project.Config{
 		FormatVersion: 1,
 		ProjectID:     request.ProjectID,
-		Profiles: map[string]project.Profile{"default": {
-			Provider: "1password", Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
-		}},
-		Commands: map[string]project.Binding{},
+		Profiles:      map[string]project.Profile{"default": profile},
+		Commands:      map[string]project.Binding{},
 	}
 	if request.PackageScript == "" && request.Binding == "" {
 		return config, nil, nil
@@ -182,13 +217,20 @@ func plan(request Request) (project.Config, []byte, error) {
 }
 
 func encodeConfig(config project.Config) ([]byte, error) {
-	data := []byte(fmt.Sprintf("format_version = 1\nproject_id = %q\n\n[profiles.default]\nprovider = \"1password\"\naccount = %q\nvault = %q\n", config.ProjectID, config.Profiles["default"].Account, config.Profiles["default"].Vault))
 	profile := config.Profiles["default"]
+	data := []byte(fmt.Sprintf("format_version = 1\nproject_id = %q\n\n[profiles.default]\nprovider = %q\n", config.ProjectID, profile.Provider))
+	if profile.Provider == "1password" {
+		data = append(data, fmt.Sprintf("account = %q\nvault = %q\n", profile.Account, profile.Vault)...)
+	}
+	if profile.Provider == "local" {
+		goto bindings
+	}
 	if profile.ItemID != "" {
 		data = append(data, fmt.Sprintf("item_id = %q\n", profile.ItemID)...)
 	} else {
 		data = append(data, fmt.Sprintf("item = %q\n", profile.Item)...)
 	}
+bindings:
 	for name, binding := range config.Commands {
 		command, err := json.Marshal(binding.Command)
 		if err != nil {
@@ -269,9 +311,12 @@ func safeCommand(value string) ([]string, bool) {
 	return parts, len(parts) > 0
 }
 
-func runValidation(request Request) error {
+func runValidation(request Request, localSecrets map[string]string) error {
 	if request.RunValidation != nil {
 		return request.RunValidation(request.Validate)
+	}
+	if request.Local {
+		return executor.RunCommand(request.Validate, localSecrets)
 	}
 	provider, err := vaults.NewOnePasswordProvider()
 	if err != nil {

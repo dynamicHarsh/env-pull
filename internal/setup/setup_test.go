@@ -2,6 +2,7 @@ package setup_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/harsh-sonkar/env-pull/internal/setup"
+	"github.com/harsh-sonkar/env-pull/internal/store"
 )
 
 func TestRunDoesNotChangeProjectWhenOnePasswordIsUnavailable(t *testing.T) {
@@ -66,6 +68,113 @@ func TestRunPreviewsConfigurationUntilConfirmed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
 		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
+	}
+}
+
+func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+	request := setup.Request{
+		Directory:     directory,
+		ProjectID:     "billing-api",
+		Local:         true,
+		Confirm:       true,
+		Validate:      []string{"go", "test", "./..."},
+		RunValidation: func([]string) error { return nil },
+		Store:         credentialStore,
+		Output:        io.Discard,
+	}
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	secrets, err := credentialStore.Get("billing-api", "default")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got, want := secrets["TOKEN"], "local-value"; got != want {
+		t.Errorf("stored TOKEN = %q, want %q", got, want)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(config, []byte("local-value")) || !bytes.Contains(config, []byte("provider = \"local\"")) {
+		t.Errorf("inject.toml = %q, want local source without secret values", config)
+	}
+}
+
+func TestRunLocalDoesNotImportUntilConfirmed(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+	err := setup.Run(setup.Request{
+		Directory: directory,
+		ProjectID: "billing-api",
+		Local:     true,
+		Validate:  []string{"true"},
+		Store:     credentialStore,
+		Output:    io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
+		t.Error("Get() error = nil after cancelled setup, want unavailable secret set")
+	}
+}
+
+func TestRunLocalValidatesSecretsBeforeConfirmedEnvRemoval(t *testing.T) {
+	directory := t.TempDir()
+	envPath := filepath.Join(directory, ".env")
+	if err := os.WriteFile(envPath, []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := setup.Run(setup.Request{
+		Directory:        directory,
+		ProjectID:        "billing-api",
+		Local:            true,
+		Confirm:          true,
+		Validate:         []string{"sh", "-c", "test \"$TOKEN\" = local-value"},
+		RemoveLegacyEnv:  true,
+		ConfirmRemoveEnv: true,
+		Store:            store.NewMemory(),
+		Output:           io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := os.Stat(envPath); !os.IsNotExist(err) {
+		t.Errorf("legacy .env stat error = %v, want removed after successful validation", err)
+	}
+}
+
+func TestRunLocalDoesNotSaveSecretsWhenValidationFails(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+	err := setup.Run(setup.Request{
+		Directory:     directory,
+		ProjectID:     "billing-api",
+		Local:         true,
+		Confirm:       true,
+		Validate:      []string{"true"},
+		RunValidation: func([]string) error { return fmt.Errorf("failed") },
+		Store:         credentialStore,
+		Output:        io.Discard,
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want validation failure")
+	}
+	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
+		t.Error("Get() error = nil after failed validation, want unavailable secret set")
 	}
 }
 

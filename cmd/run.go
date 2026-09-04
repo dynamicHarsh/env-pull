@@ -12,6 +12,7 @@ import (
 
 	"github.com/harsh-sonkar/env-pull/internal/executor"
 	"github.com/harsh-sonkar/env-pull/internal/project"
+	"github.com/harsh-sonkar/env-pull/internal/store"
 	"github.com/harsh-sonkar/env-pull/internal/vaults"
 )
 
@@ -108,6 +109,8 @@ func loadProfileSecrets(profileName string) (map[string]string, error) {
 		return nil, fmt.Errorf("run: %w", err)
 	}
 	switch profile.Provider {
+	case "local":
+		return loadLocalProfileSecrets(config, profileName, store.NewSystem())
 	case "1password":
 		provider, err := vaults.NewOnePasswordProvider()
 		if err != nil {
@@ -131,6 +134,17 @@ func loadProfileSecrets(profileName string) (map[string]string, error) {
 	default:
 		return nil, fmt.Errorf("run: unsupported provider %q", profile.Provider)
 	}
+}
+
+func loadLocalProfileSecrets(config project.Config, profileName string, credentialStore store.Store) (map[string]string, error) {
+	if profileName == "" {
+		profileName = "default"
+	}
+	secrets, err := credentialStore.Get(config.ProjectID, profileName)
+	if err != nil {
+		return nil, fmt.Errorf("run: local secret set is unavailable")
+	}
+	return secrets, nil
 }
 
 func init() {
