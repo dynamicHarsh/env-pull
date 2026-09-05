@@ -11,6 +11,7 @@ import (
 
 var (
 	setupProjectID        string
+	setupProvider         string
 	setupAccount          string
 	setupVault            string
 	setupItemID           string
@@ -38,6 +39,7 @@ only after validation to delete a detected legacy .env file.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		return setupworkflow.Run(setupworkflow.Request{
 			ProjectID:        setupProjectID,
+			Provider:         setupProvider,
 			Account:          setupAccount,
 			Vault:            setupVault,
 			ItemID:           setupItemID,
@@ -58,6 +60,7 @@ only after validation to delete a detected legacy .env file.`,
 
 func init() {
 	setupCmd.Flags().StringVar(&setupProjectID, "project-id", "", "stable project identifier")
+	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password)")
 	setupCmd.Flags().StringVar(&setupAccount, "account", "", "1Password account")
 	setupCmd.Flags().StringVar(&setupVault, "vault", "", "1Password vault")
 	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable 1Password item ID")

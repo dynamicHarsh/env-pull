@@ -71,6 +71,25 @@ func TestRunPreviewsConfigurationUntilConfirmed(t *testing.T) {
 	}
 }
 
+func TestRunSelectsOnePasswordWhenProviderIsExplicit(t *testing.T) {
+	directory := t.TempDir()
+	request := request(directory, io.Discard)
+	request.Provider = "1password"
+	request.Confirm = true
+	request.RunValidation = func([]string) error { return nil }
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte("provider = \"1password\"")) {
+		t.Errorf("inject.toml = %q, want explicit 1Password source", config)
+	}
+}
+
 func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {

@@ -26,6 +26,7 @@ var ErrOnePasswordUnavailable = errors.New("1password unavailable")
 type Request struct {
 	Directory        string
 	ProjectID        string
+	Provider         string
 	Account          string
 	Vault            string
 	ItemID           string
@@ -142,6 +143,12 @@ func Run(request Request) error {
 func validateRequest(request Request) error {
 	if strings.TrimSpace(request.ProjectID) == "" {
 		return fmt.Errorf("setup: project ID is required")
+	}
+	if request.Provider != "" && request.Provider != "1password" {
+		return fmt.Errorf("setup: unsupported provider %q", request.Provider)
+	}
+	if request.Provider == "1password" && request.Local {
+		return fmt.Errorf("setup: provider and local source cannot be selected together")
 	}
 	if request.Local {
 		return nil
