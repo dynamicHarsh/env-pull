@@ -6,9 +6,9 @@ import { Check, Copy } from "lucide-react";
 import TerminalAnimation from "@/components/TerminalAnimation";
 
 const commands = {
-  mac: "brew tap dynamicHarsh/tap && brew install env-pull",
+  mac: "brew tap dynamicHarsh/tap && brew install inject",
   windows:
-    "scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install env-pull",
+    "scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install inject",
 };
 
 export default function HeroSection() {

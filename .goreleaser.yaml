@@ -51,6 +51,7 @@ brews:
     directory: Formula
     install: |
       bin.install "inject"
+      bin.install_symlink "inject" => "env-pull"
     test: |
       system "#{bin}/inject", "--help"
 
