@@ -1,14 +1,14 @@
 version: 2
 
-project_name: env-pull
+project_name: inject
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: env-pull
-    binary: env-pull
+  - id: inject
+    binary: inject
     main: .
     env:
       - CGO_ENABLED=0
@@ -19,7 +19,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    # Produce exactly: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
     ignore:
       - goos: windows
         goarch: arm64
@@ -41,7 +40,7 @@ checksum:
   algorithm: sha256
 
 brews:
-  - name: env-pull
+  - name: inject
     homepage: "https://github.com/dynamicHarsh/env-pull"
     description: "Universal Secrets Adapter"
     license: "MIT"
@@ -51,12 +50,12 @@ brews:
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     directory: Formula
     install: |
-      bin.install "env-pull"
+      bin.install "inject"
     test: |
-      system "#{bin}/env-pull", "--version"
+      system "#{bin}/inject", "--help"
 
 scoops:
-  - name: env-pull
+  - name: inject
     homepage: "https://github.com/dynamicHarsh/env-pull"
     description: "Universal Secrets Adapter"
     license: "MIT"
