@@ -109,7 +109,7 @@ func Run(request Request) error {
 		fmt.Fprintln(request.Output, "No changes made; rerun with explicit confirmation")
 		return nil
 	}
-	if !request.Local || len(request.Validate) > 0 {
+	if !request.Local || request.RemoveLegacyEnv || len(request.Validate) > 0 {
 		if err := validateValidationCommand(request.Validate); err != nil {
 			return err
 		}

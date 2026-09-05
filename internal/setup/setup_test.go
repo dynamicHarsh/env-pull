@@ -243,6 +243,46 @@ func TestRunLocalValidatesSecretsBeforeConfirmedEnvRemoval(t *testing.T) {
 	}
 }
 
+func TestRunLocalRejectsLegacyEnvRemovalWithoutValidationCommand(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		validate []string
+		wantErr  string
+	}{
+		{name: "missing command", wantErr: "setup: a finite validation command is required"},
+		{name: "non-finite command", validate: []string{"npm", "run", "dev"}, wantErr: "setup: validation command must be finite"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			envPath := filepath.Join(directory, ".env")
+			if err := os.WriteFile(envPath, []byte("TOKEN=local-value\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := setup.Run(setup.Request{
+				Directory:        directory,
+				ProjectID:        "billing-api",
+				Local:            true,
+				Confirm:          true,
+				Validate:         test.validate,
+				RemoveLegacyEnv:  true,
+				ConfirmRemoveEnv: true,
+				Store:            store.NewMemory(),
+				Output:           io.Discard,
+			})
+			if err == nil {
+				t.Fatal("Run() error = nil, want finite validation command error")
+			}
+			if got := err.Error(); got != test.wantErr {
+				t.Errorf("Run() error = %q, want %q", got, test.wantErr)
+			}
+			if _, err := os.Stat(envPath); err != nil {
+				t.Errorf("legacy .env stat error = %v, want retained", err)
+			}
+		})
+	}
+}
+
 func TestRunLocalDoesNotSaveSecretsWhenValidationFails(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
