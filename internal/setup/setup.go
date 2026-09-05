@@ -53,6 +53,16 @@ func Run(request Request) error {
 	if request.Output == nil {
 		request.Output = io.Discard
 	}
+	legacyEnvPath := filepath.Join(request.Directory, ".env")
+	_, legacyEnvExists := statFile(legacyEnvPath)
+	selectSource(&request, legacyEnvExists)
+	if request.ProjectID == "" {
+		projectID, err := defaultProjectID(request.Directory)
+		if err != nil {
+			return err
+		}
+		request.ProjectID = projectID
+	}
 	if err := validateRequest(request); err != nil {
 		return err
 	}
@@ -66,8 +76,6 @@ func Run(request Request) error {
 		return fmt.Errorf("setup: inject.toml already exists")
 	}
 
-	legacyEnvPath := filepath.Join(request.Directory, ".env")
-	_, legacyEnvExists := statFile(legacyEnvPath)
 	if legacyEnvExists {
 		fmt.Fprintln(request.Output, "Detected legacy .env")
 	}
@@ -92,8 +100,10 @@ func Run(request Request) error {
 		fmt.Fprintln(request.Output, "No changes made; rerun with explicit confirmation")
 		return nil
 	}
-	if err := validateValidationCommand(request.Validate); err != nil {
-		return err
+	if !request.Local || len(request.Validate) > 0 {
+		if err := validateValidationCommand(request.Validate); err != nil {
+			return err
+		}
 	}
 	var localSecrets map[string]string
 	if request.Local {
@@ -108,6 +118,14 @@ func Run(request Request) error {
 		if err != nil {
 			return fmt.Errorf("setup: import legacy .env: %w", err)
 		}
+		if len(request.Validate) > 0 {
+			if err := runValidation(request, localSecrets); err != nil {
+				return fmt.Errorf("setup: validation failed: %w", err)
+			}
+		}
+		if err := request.Store.Put(request.ProjectID, "default", localSecrets); err != nil {
+			return fmt.Errorf("setup: save local secret set: %w", err)
+		}
 	}
 
 	if err := os.WriteFile(filepath.Join(request.Directory, project.FileName), configData, 0o644); err != nil {
@@ -118,12 +136,9 @@ func Run(request Request) error {
 			return fmt.Errorf("setup: update package.json: %w", err)
 		}
 	}
-	if err := runValidation(request, localSecrets); err != nil {
-		return fmt.Errorf("setup: validation failed: %w", err)
-	}
-	if request.Local {
-		if err := request.Store.Put(request.ProjectID, "default", localSecrets); err != nil {
-			return fmt.Errorf("setup: save local secret set: %w", err)
+	if !request.Local {
+		if err := runValidation(request, localSecrets); err != nil {
+			return fmt.Errorf("setup: validation failed: %w", err)
 		}
 	}
 	fmt.Fprintln(request.Output, "Validation succeeded")
@@ -138,6 +153,25 @@ func Run(request Request) error {
 		fmt.Fprintln(request.Output, "Removed legacy .env")
 	}
 	return nil
+}
+
+func selectSource(request *Request, legacyEnvExists bool) {
+	if request.Local || request.Provider != "" || hasRemoteReference(*request) || !legacyEnvExists {
+		return
+	}
+	request.Local = true
+}
+
+func hasRemoteReference(request Request) bool {
+	return request.Account != "" || request.Vault != "" || request.ItemID != "" || request.Item != ""
+}
+
+func defaultProjectID(directory string) (string, error) {
+	absoluteDirectory, err := filepath.Abs(directory)
+	if err != nil {
+		return "", fmt.Errorf("setup: determine project directory: %w", err)
+	}
+	return filepath.Base(absoluteDirectory), nil
 }
 
 func validateRequest(request Request) error {

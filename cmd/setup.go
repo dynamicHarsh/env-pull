@@ -31,10 +31,12 @@ var setupCmd = &cobra.Command{
 	Short: "Configure inject for a 1Password secret note",
 	Long: `setup previews a non-secret inject.toml configuration and optional safe
 package script update. It checks the existing op CLI session before changing
-project files and runs only the finite validation command you select.
+project files for remote sources. A detected .env selects local credential-store
+migration unless a remote provider or reference is selected.
 
-Use --yes to apply the preview. Use --remove-env together with --yes-remove-env
-only after validation to delete a detected legacy .env file.`,
+Use --yes to apply the preview. Remote setup requires a finite validation command.
+Use --remove-env together with --yes-remove-env to delete a detected legacy .env
+after a successful validation.`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		return setupworkflow.Run(setupworkflow.Request{
@@ -69,7 +71,7 @@ func init() {
 	setupCmd.Flags().StringVar(&setupPackageScript, "package-script", "", "package.json script to bind when safe")
 	setupCmd.Flags().StringArrayVar(&setupCommand, "command", nil, "binding command argument; repeat for each argument")
 	setupCmd.Flags().StringArrayVar(&setupValidation, "validate", nil, "finite validation command argument; repeat for each argument")
-	setupCmd.Flags().BoolVar(&setupLocal, "local", false, "import a legacy .env into the local credential store")
+	setupCmd.Flags().BoolVar(&setupLocal, "local", false, "force import of a legacy .env into the local credential store")
 	setupCmd.Flags().BoolVar(&setupConfirm, "yes", false, "apply the previewed project changes")
 	setupCmd.Flags().BoolVar(&setupRemoveLegacyEnv, "remove-env", false, "remove a legacy .env after validation")
 	setupCmd.Flags().BoolVar(&setupConfirmRemoveEnv, "yes-remove-env", false, "confirm removal of a legacy .env")

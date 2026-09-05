@@ -126,6 +126,74 @@ func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
 	}
 }
 
+func TestRunDefaultsToLocalMigrationWhenLegacyEnvExists(t *testing.T) {
+	directory := t.TempDir()
+	envPath := filepath.Join(directory, ".env")
+	if err := os.WriteFile(envPath, []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+
+	if err := setup.Run(setup.Request{
+		Directory: directory,
+		Confirm:   true,
+		Store:     credentialStore,
+		Output:    io.Discard,
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	projectID := filepath.Base(directory)
+	secrets, err := credentialStore.Get(projectID, "default")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got, want := secrets["TOKEN"], "local-value"; got != want {
+		t.Errorf("stored TOKEN = %q, want %q", got, want)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(config, []byte("local-value")) || !bytes.Contains(config, []byte("project_id = \""+projectID+"\"")) || !bytes.Contains(config, []byte("provider = \"local\"")) {
+		t.Errorf("inject.toml = %q, want non-secret default local configuration", config)
+	}
+	if _, err := os.Stat(envPath); err != nil {
+		t.Errorf("legacy .env stat error = %v, want retained", err)
+	}
+}
+
+func TestRunDefaultLocalMigrationDoesNotWriteConfigurationWhenImportCannotComplete(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		env   string
+		store store.Store
+	}{
+		{name: "malformed legacy environment", env: "TOKEN\n", store: store.NewMemory()},
+		{name: "unavailable credential store", env: "TOKEN=local-value\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, ".env"), []byte(test.env), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := setup.Run(setup.Request{
+				Directory: directory,
+				Confirm:   true,
+				Store:     test.store,
+				Output:    io.Discard,
+			})
+			if err == nil {
+				t.Fatal("Run() error = nil, want failed local import")
+			}
+			if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+				t.Errorf("inject.toml stat error = %v, want no configuration written", err)
+			}
+		})
+	}
+}
+
 func TestRunLocalDoesNotImportUntilConfirmed(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
