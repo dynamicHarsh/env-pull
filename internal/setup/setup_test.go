@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harsh-sonkar/env-pull/internal/setup"
@@ -71,6 +72,26 @@ func TestRunPreviewsConfigurationUntilConfirmed(t *testing.T) {
 	}
 }
 
+func TestRunSelectsOnePasswordWhenProviderIsExplicit(t *testing.T) {
+	directory := t.TempDir()
+	var output bytes.Buffer
+	request := request(directory, &output)
+	request.Provider = "1password"
+	request.Confirm = true
+	request.RunValidation = func([]string) error { return nil }
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte("provider = \"1password\"")) {
+		t.Errorf("inject.toml = %q, want explicit 1Password source", config)
+	}
+}
+
 func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=local-value\n"), 0o600); err != nil {
@@ -104,6 +125,74 @@ func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
 	}
 	if bytes.Contains(config, []byte("local-value")) || !bytes.Contains(config, []byte("provider = \"local\"")) {
 		t.Errorf("inject.toml = %q, want local source without secret values", config)
+	}
+}
+
+func TestRunDefaultsToLocalMigrationWhenLegacyEnvExists(t *testing.T) {
+	directory := t.TempDir()
+	envPath := filepath.Join(directory, ".env")
+	if err := os.WriteFile(envPath, []byte("TOKEN=local-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+
+	if err := setup.Run(setup.Request{
+		Directory: directory,
+		Confirm:   true,
+		Store:     credentialStore,
+		Output:    io.Discard,
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	projectID := filepath.Base(directory)
+	secrets, err := credentialStore.Get(projectID, "default")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got, want := secrets["TOKEN"], "local-value"; got != want {
+		t.Errorf("stored TOKEN = %q, want %q", got, want)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(config, []byte("local-value")) || !bytes.Contains(config, []byte("project_id = \""+projectID+"\"")) || !bytes.Contains(config, []byte("provider = \"local\"")) {
+		t.Errorf("inject.toml = %q, want non-secret default local configuration", config)
+	}
+	if _, err := os.Stat(envPath); err != nil {
+		t.Errorf("legacy .env stat error = %v, want retained", err)
+	}
+}
+
+func TestRunDefaultLocalMigrationDoesNotWriteConfigurationWhenImportCannotComplete(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		env   string
+		store store.Store
+	}{
+		{name: "malformed legacy environment", env: "TOKEN\n", store: store.NewMemory()},
+		{name: "unavailable credential store", env: "TOKEN=local-value\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, ".env"), []byte(test.env), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := setup.Run(setup.Request{
+				Directory: directory,
+				Confirm:   true,
+				Store:     test.store,
+				Output:    io.Discard,
+			})
+			if err == nil {
+				t.Fatal("Run() error = nil, want failed local import")
+			}
+			if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+				t.Errorf("inject.toml stat error = %v, want no configuration written", err)
+			}
+		})
 	}
 }
 
@@ -151,6 +240,46 @@ func TestRunLocalValidatesSecretsBeforeConfirmedEnvRemoval(t *testing.T) {
 	}
 	if _, err := os.Stat(envPath); !os.IsNotExist(err) {
 		t.Errorf("legacy .env stat error = %v, want removed after successful validation", err)
+	}
+}
+
+func TestRunLocalRejectsLegacyEnvRemovalWithoutValidationCommand(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		validate []string
+		wantErr  string
+	}{
+		{name: "missing command", wantErr: "setup: a finite validation command is required"},
+		{name: "non-finite command", validate: []string{"npm", "run", "dev"}, wantErr: "setup: validation command must be finite"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			envPath := filepath.Join(directory, ".env")
+			if err := os.WriteFile(envPath, []byte("TOKEN=local-value\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := setup.Run(setup.Request{
+				Directory:        directory,
+				ProjectID:        "billing-api",
+				Local:            true,
+				Confirm:          true,
+				Validate:         test.validate,
+				RemoveLegacyEnv:  true,
+				ConfirmRemoveEnv: true,
+				Store:            store.NewMemory(),
+				Output:           io.Discard,
+			})
+			if err == nil {
+				t.Fatal("Run() error = nil, want finite validation command error")
+			}
+			if got := err.Error(); got != test.wantErr {
+				t.Errorf("Run() error = %q, want %q", got, test.wantErr)
+			}
+			if _, err := os.Stat(envPath); err != nil {
+				t.Errorf("legacy .env stat error = %v, want retained", err)
+			}
+		})
 	}
 }
 
@@ -237,6 +366,88 @@ func TestRunUsesExplicitBindingForUnsafePackageScript(t *testing.T) {
 	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
 	if err != nil || !bytes.Contains(config, []byte("[commands.dev]")) {
 		t.Errorf("inject.toml = %q, %v; want explicit dev binding", config, err)
+	}
+}
+
+func TestRunBindsPackageScriptWithoutChangingPackageManifest(t *testing.T) {
+	directory := t.TempDir()
+	packagePath := filepath.Join(directory, "package.json")
+	contents := []byte(`{"scripts":{"dev":"vite --host 0.0.0.0 | tee app.log"}}`)
+	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.Confirm = true
+	request.PackageScript = "dev"
+	request.RunValidation = func([]string) error { return nil }
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, err := os.ReadFile(packagePath); err != nil || !bytes.Equal(got, contents) {
+		t.Errorf("package.json = %q, %v; want unchanged", got, err)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte("[commands.dev]")) || !bytes.Contains(config, []byte(`command = ["npm","run","dev"]`)) {
+		t.Errorf("inject.toml = %q, want npm run dev binding", config)
+	}
+}
+
+func TestRunRejectsUnknownPackageScript(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.PackageScript = "test"
+
+	err := setup.Run(request)
+	if err == nil || err.Error() != `setup: package.json has no "test" script` {
+		t.Fatalf("Run() error = %v, want unknown package script error", err)
+	}
+}
+
+func TestRunOffersDevAsDefaultPackageScriptBinding(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"test":"go test ./...","dev":"vite","lint":"eslint ."}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	request := request(directory, &output)
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Candidate command: dev (default)") || !strings.Contains(got, "Candidate command: lint") || !strings.Contains(got, "Candidate command: test") {
+		t.Errorf("output = %q, want dev default and all package scripts", got)
+	}
+}
+
+func TestRunSelectsDefaultPackageScriptBinding(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	request := request(directory, &output)
+	request.SelectPackageScript = func(candidates []string, defaultScript string) (string, error) {
+		if want := []string{"dev"}; !reflect.DeepEqual(candidates, want) {
+			t.Errorf("candidates = %q, want %q", candidates, want)
+		}
+		if defaultScript != "dev" {
+			t.Errorf("default script = %q, want dev", defaultScript)
+		}
+		return defaultScript, nil
+	}
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := output.String(); !bytes.Contains([]byte(got), []byte("[commands.dev]")) {
+		t.Errorf("output = %q, want selected dev binding in preview", got)
 	}
 }
 

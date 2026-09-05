@@ -208,6 +208,15 @@ item_id = "stable-note-id"
 }
 
 func TestSetupWritesConfirmedConfigurationAfterValidation(t *testing.T) {
+	testSetupWritesConfirmedConfigurationAfterValidation(t, nil)
+}
+
+func TestSetupWritesConfirmedConfigurationWithExplicitOnePasswordProvider(t *testing.T) {
+	testSetupWritesConfirmedConfigurationAfterValidation(t, []string{"--provider", "1password"})
+}
+
+func testSetupWritesConfirmedConfigurationAfterValidation(t *testing.T, providerArgs []string) {
+	t.Helper()
 	binaryPath := filepath.Join(t.TempDir(), "inject")
 	build := exec.Command("go", "build", "-o", binaryPath, ".")
 	if output, err := build.CombinedOutput(); err != nil {
@@ -221,10 +230,12 @@ func TestSetupWritesConfirmedConfigurationAfterValidation(t *testing.T) {
 		t.Fatalf("write fake op: %v", err)
 	}
 
-	command := exec.Command(binaryPath,
-		"setup", "--project-id", "billing-api", "--account", "acme", "--vault", "Engineering", "--item-id", "stable-note-id", "--yes",
+	args := append([]string{"setup"}, providerArgs...)
+	args = append(args,
+		"--project-id", "billing-api", "--account", "acme", "--vault", "Engineering", "--item-id", "stable-note-id", "--yes",
 		"--validate=sh", "--validate=-c", "--validate=exit 0",
 	)
+	command := exec.Command(binaryPath, args...)
 	command.Dir = projectDir
 	command.Env = append(os.Environ(), "PATH="+projectDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	output, err := command.CombinedOutput()

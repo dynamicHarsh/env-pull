@@ -73,18 +73,16 @@ inject dev
 
 ### Local-only project
 
-To import an existing `.env` into macOS Keychain or Linux Secret Service, run setup with `--local`:
+From a directory with an existing `.env`, setup imports into macOS Keychain or Linux Secret Service by default. The project ID defaults to the directory name and can be overridden with `--project-id`:
 
 ```bash
 inject setup \
-  --local \
-  --project-id my-app \
   --binding dev \
   --command npm --command run --command dev \
   --yes
 ```
 
-The imported values stay in the operating system credential store. They are not shared through `inject.toml`.
+The imported values stay in the operating system credential store. They are not shared through `inject.toml`, and `.env` remains unless removal is explicitly requested. Use `--local` to force local source selection when needed.
 
 ### One-off command
 
