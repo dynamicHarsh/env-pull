@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/harsh-sonkar/env-pull/internal/setup"
@@ -73,7 +74,8 @@ func TestRunPreviewsConfigurationUntilConfirmed(t *testing.T) {
 
 func TestRunSelectsOnePasswordWhenProviderIsExplicit(t *testing.T) {
 	directory := t.TempDir()
-	request := request(directory, io.Discard)
+	var output bytes.Buffer
+	request := request(directory, &output)
 	request.Provider = "1password"
 	request.Confirm = true
 	request.RunValidation = func([]string) error { return nil }
@@ -324,6 +326,88 @@ func TestRunUsesExplicitBindingForUnsafePackageScript(t *testing.T) {
 	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
 	if err != nil || !bytes.Contains(config, []byte("[commands.dev]")) {
 		t.Errorf("inject.toml = %q, %v; want explicit dev binding", config, err)
+	}
+}
+
+func TestRunBindsPackageScriptWithoutChangingPackageManifest(t *testing.T) {
+	directory := t.TempDir()
+	packagePath := filepath.Join(directory, "package.json")
+	contents := []byte(`{"scripts":{"dev":"vite --host 0.0.0.0 | tee app.log"}}`)
+	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.Confirm = true
+	request.PackageScript = "dev"
+	request.RunValidation = func([]string) error { return nil }
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, err := os.ReadFile(packagePath); err != nil || !bytes.Equal(got, contents) {
+		t.Errorf("package.json = %q, %v; want unchanged", got, err)
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte("[commands.dev]")) || !bytes.Contains(config, []byte(`command = ["npm","run","dev"]`)) {
+		t.Errorf("inject.toml = %q, want npm run dev binding", config)
+	}
+}
+
+func TestRunRejectsUnknownPackageScript(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.PackageScript = "test"
+
+	err := setup.Run(request)
+	if err == nil || err.Error() != `setup: package.json has no "test" script` {
+		t.Fatalf("Run() error = %v, want unknown package script error", err)
+	}
+}
+
+func TestRunOffersDevAsDefaultPackageScriptBinding(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"test":"go test ./...","dev":"vite","lint":"eslint ."}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	request := request(directory, &output)
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Candidate command: dev (default)") || !strings.Contains(got, "Candidate command: lint") || !strings.Contains(got, "Candidate command: test") {
+		t.Errorf("output = %q, want dev default and all package scripts", got)
+	}
+}
+
+func TestRunSelectsDefaultPackageScriptBinding(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	request := request(directory, &output)
+	request.SelectPackageScript = func(candidates []string, defaultScript string) (string, error) {
+		if want := []string{"dev"}; !reflect.DeepEqual(candidates, want) {
+			t.Errorf("candidates = %q, want %q", candidates, want)
+		}
+		if defaultScript != "dev" {
+			t.Errorf("default script = %q, want dev", defaultScript)
+		}
+		return defaultScript, nil
+	}
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := output.String(); !bytes.Contains([]byte(got), []byte("[commands.dev]")) {
+		t.Errorf("output = %q, want selected dev binding in preview", got)
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/harsh-sonkar/env-pull/internal/executor"
 	"github.com/harsh-sonkar/env-pull/internal/parser"
@@ -24,25 +23,26 @@ import (
 var ErrOnePasswordUnavailable = errors.New("1password unavailable")
 
 type Request struct {
-	Directory        string
-	ProjectID        string
-	Provider         string
-	Account          string
-	Vault            string
-	ItemID           string
-	Item             string
-	Binding          string
-	Command          []string
-	PackageScript    string
-	Validate         []string
-	Local            bool
-	Confirm          bool
-	RemoveLegacyEnv  bool
-	ConfirmRemoveEnv bool
-	CheckOnePassword func() error
-	RunValidation    func([]string) error
-	Store            store.Store
-	Output           io.Writer
+	Directory           string
+	ProjectID           string
+	Provider            string
+	Account             string
+	Vault               string
+	ItemID              string
+	Item                string
+	Binding             string
+	Command             []string
+	PackageScript       string
+	SelectPackageScript func([]string, string) (string, error)
+	Validate            []string
+	Local               bool
+	Confirm             bool
+	RemoveLegacyEnv     bool
+	ConfirmRemoveEnv    bool
+	CheckOnePassword    func() error
+	RunValidation       func([]string) error
+	Store               store.Store
+	Output              io.Writer
 }
 
 // Run previews and, after confirmation, applies a non-secret inject configuration.
@@ -79,11 +79,23 @@ func Run(request Request) error {
 	if legacyEnvExists {
 		fmt.Fprintln(request.Output, "Detected legacy .env")
 	}
-	for _, name := range candidatePackageScripts(request.Directory) {
+	candidates := candidatePackageScripts(request.Directory)
+	for _, name := range candidates {
+		if name == "dev" {
+			fmt.Fprintln(request.Output, "Candidate command: dev (default)")
+			continue
+		}
 		fmt.Fprintf(request.Output, "Candidate command: %s\n", name)
 	}
+	if request.PackageScript == "" && request.Binding == "" && request.SelectPackageScript != nil {
+		selection, err := request.SelectPackageScript(candidates, defaultPackageScript(candidates))
+		if err != nil {
+			return err
+		}
+		request.PackageScript = selection
+	}
 
-	config, packageChange, err := plan(request)
+	config, err := plan(request)
 	if err != nil {
 		return err
 	}
@@ -93,9 +105,6 @@ func Run(request Request) error {
 	}
 	fmt.Fprintln(request.Output, "Will write inject.toml:")
 	fmt.Fprint(request.Output, string(configData))
-	if packageChange != nil {
-		fmt.Fprintf(request.Output, "Will update package.json script %q to run inject %s\n", request.PackageScript, request.PackageScript)
-	}
 	if !request.Confirm {
 		fmt.Fprintln(request.Output, "No changes made; rerun with explicit confirmation")
 		return nil
@@ -130,11 +139,6 @@ func Run(request Request) error {
 
 	if err := os.WriteFile(filepath.Join(request.Directory, project.FileName), configData, 0o644); err != nil {
 		return fmt.Errorf("setup: write inject.toml: %w", err)
-	}
-	if packageChange != nil {
-		if err := os.WriteFile(filepath.Join(request.Directory, "package.json"), packageChange, 0o644); err != nil {
-			return fmt.Errorf("setup: update package.json: %w", err)
-		}
 	}
 	if !request.Local {
 		if err := runValidation(request, localSecrets); err != nil {
@@ -216,7 +220,7 @@ func checkOnePassword(request Request) error {
 	return nil
 }
 
-func plan(request Request) (project.Config, []byte, error) {
+func plan(request Request) (project.Config, error) {
 	profile := project.Profile{
 		Provider: "1password", Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
 	}
@@ -230,31 +234,24 @@ func plan(request Request) (project.Config, []byte, error) {
 		Commands:      map[string]project.Binding{},
 	}
 	if request.PackageScript == "" && request.Binding == "" {
-		return config, nil, nil
+		return config, nil
 	}
 	binding := request.Binding
 	if binding == "" {
 		binding = request.PackageScript
 	}
 	command := request.Command
-	var packageChange []byte
 	if request.PackageScript != "" {
-		var err error
-		command, packageChange, err = packageBinding(request.Directory, request.PackageScript)
-		if err != nil {
-			return project.Config{}, nil, err
+		if err := validatePackageScript(request.Directory, request.PackageScript); err != nil {
+			return project.Config{}, err
 		}
-		if command == nil {
-			fmt.Fprintf(request.Output, "Script %q is not safe to rewrite; creating an explicit binding instead\n", request.PackageScript)
-			command = request.Command
-			packageChange = nil
-		}
+		command = []string{"npm", "run", request.PackageScript}
 	}
 	if len(command) == 0 {
-		return project.Config{}, nil, fmt.Errorf("setup: binding %q requires a command", binding)
+		return project.Config{}, fmt.Errorf("setup: binding %q requires a command", binding)
 	}
 	config.Commands[binding] = project.Binding{Command: command}
-	return config, packageChange, nil
+	return config, nil
 }
 
 func encodeConfig(config project.Config) ([]byte, error) {
@@ -285,39 +282,21 @@ bindings:
 	return data, nil
 }
 
-func packageBinding(directory, script string) ([]string, []byte, error) {
-	path := filepath.Join(directory, "package.json")
-	data, err := os.ReadFile(path)
+func validatePackageScript(directory, script string) error {
+	data, err := os.ReadFile(filepath.Join(directory, "package.json"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("setup: read package.json: %w", err)
+		return fmt.Errorf("setup: read package.json: %w", err)
 	}
-	var manifest map[string]json.RawMessage
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, nil, fmt.Errorf("setup: invalid package.json: %w", err)
+		return fmt.Errorf("setup: invalid package.json: %w", err)
 	}
-	var scripts map[string]string
-	if err := json.Unmarshal(manifest["scripts"], &scripts); err != nil {
-		return nil, nil, fmt.Errorf("setup: package.json scripts must be an object: %w", err)
+	if _, exists := manifest.Scripts[script]; !exists {
+		return fmt.Errorf("setup: package.json has no %q script", script)
 	}
-	value, exists := scripts[script]
-	if !exists {
-		return nil, nil, fmt.Errorf("setup: package.json has no %q script", script)
-	}
-	command, safe := safeCommand(value)
-	if !safe {
-		return nil, nil, nil
-	}
-	scripts[script] = "inject " + script
-	encodedScripts, err := json.Marshal(scripts)
-	if err != nil {
-		return nil, nil, err
-	}
-	manifest["scripts"] = encodedScripts
-	updated, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	return command, append(updated, '\n'), nil
+	return nil
 }
 
 func candidatePackageScripts(directory string) []string {
@@ -332,24 +311,25 @@ func candidatePackageScripts(directory string) []string {
 		return nil
 	}
 	candidates := make([]string, 0, len(manifest.Scripts))
-	for name := range manifest.Scripts {
-		candidates = append(candidates, name)
+	if _, exists := manifest.Scripts["dev"]; exists {
+		candidates = append(candidates, "dev")
 	}
-	sort.Strings(candidates)
+	for name := range manifest.Scripts {
+		if name != "dev" {
+			candidates = append(candidates, name)
+		}
+	}
+	if len(candidates) > 1 {
+		sort.Strings(candidates[1:])
+	}
 	return candidates
 }
 
-func safeCommand(value string) ([]string, bool) {
-	if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "|&;<>()`$\\\n\r\"'") {
-		return nil, false
+func defaultPackageScript(candidates []string) string {
+	if len(candidates) > 0 && candidates[0] == "dev" {
+		return "dev"
 	}
-	parts := strings.Fields(value)
-	for _, part := range parts {
-		if strings.IndexFunc(part, unicode.IsSpace) >= 0 {
-			return nil, false
-		}
-	}
-	return parts, len(parts) > 0
+	return ""
 }
 
 func runValidation(request Request, localSecrets map[string]string) error {
