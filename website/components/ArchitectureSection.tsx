@@ -2,6 +2,7 @@
 
 import { Lock, Cpu, AppWindow, FileWarning, ArrowDown, User } from "lucide-react";
 import { motion } from "framer-motion";
+import SectionDivider from "@/components/SectionDivider";
 
 function FlowNode({
   icon: Icon,
@@ -105,7 +106,8 @@ const slideInRight = {
 
 export default function ArchitectureSection() {
   return (
-    <section id="security" className="w-full border-t border-zinc-900 overflow-hidden scroll-mt-24">
+    <section id="security" className="w-full overflow-hidden scroll-mt-24">
+      <SectionDivider />
       <div className="py-24 max-w-6xl mx-auto px-4">
         {/* Copy */}
         <motion.div
