@@ -269,6 +269,92 @@ post_original = "printf 'post:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\""
 	}
 }
 
+func TestConfiguredPackageScriptSupportsAllPackageManagerFamilies(t *testing.T) {
+	buildDirectory := t.TempDir()
+	binaryPath := filepath.Join(buildDirectory, "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	for _, manager := range []string{"npm", "pnpm", "yarn", "bun"} {
+		t.Run(manager, func(t *testing.T) {
+			projectDir := t.TempDir()
+			config := `format_version = 1
+project_id = "test-project"
+
+[profiles.default]
+provider = "1password"
+account = "acme"
+vault = "Engineering"
+item_id = "stable-note-id"
+
+[script_bindings.dev]
+profile = "default"
+package_manager = "` + manager + `"
+wrapper = "inject __run-package-script \"dev\""
+script = "inject:original:dev"
+original = "preserved main script"
+pre_script = "inject:original:predev"
+pre_original = "preserved pre script"
+post_script = "inject:original:postdev"
+post_original = "preserved post script"
+`
+			if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(projectDir, "op"), []byte("#!/bin/sh\nprintf '%s\\n' '{\"fields\":[{\"id\":\"notesPlain\",\"value\":\"TOKEN=injected-value\\n\"}]}'\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			managerPath := filepath.Join(projectDir, manager)
+			managerScript := `#!/bin/sh
+case "$2" in
+  inject:original:predev) printf 'pre:%s\n' "$TOKEN" >> "$ORDER_FILE" ;;
+  inject:original:dev) printf 'main:%s\n' "$TOKEN" >> "$ORDER_FILE"; exit "${MAIN_EXIT:-0}" ;;
+  inject:original:postdev) printf 'post:%s\n' "$TOKEN" >> "$ORDER_FILE" ;;
+  *) exit 64 ;;
+esac
+`
+			if err := os.WriteFile(managerPath, []byte(managerScript), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			orderPath := filepath.Join(projectDir, "order.log")
+			environment := []string{
+				"PATH=" + projectDir,
+				"npm_execpath=" + managerPath,
+				"npm_config_user_agent=" + manager + "/1.0.0",
+				"ORDER_FILE=" + orderPath,
+				"TOKEN=parent-value",
+			}
+			command := exec.Command(binaryPath, "__run-package-script", "dev")
+			command.Dir = projectDir
+			command.Env = environment
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("run package script: %v\n%s", err, output)
+			}
+			order, err := os.ReadFile(orderPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := string(order), "pre:injected-value\nmain:injected-value\npost:injected-value\n"; got != want {
+				t.Errorf("lifecycle output = %q, want %q", got, want)
+			}
+
+			if err := os.Remove(orderPath); err != nil {
+				t.Fatal(err)
+			}
+			exitCommand := exec.Command(binaryPath, "__run-package-script", "dev")
+			exitCommand.Dir = projectDir
+			exitCommand.Env = append(environment, "MAIN_EXIT=7")
+			if output, err := exitCommand.CombinedOutput(); err == nil {
+				t.Fatalf("run package script = success, want exit status 7; output: %s", output)
+			} else if exitError, ok := err.(*exec.ExitError); !ok || exitError.ExitCode() != 7 {
+				t.Fatalf("run package script error = %v, want exit status 7; output: %s", err, output)
+			}
+		})
+	}
+}
+
 func TestConfiguredBitwardenRunDoesNotLaunchChildWhenSourceFails(t *testing.T) {
 	binaryPath := filepath.Join(t.TempDir(), "inject")
 	build := exec.Command("go", "build", "-o", binaryPath, ".")
