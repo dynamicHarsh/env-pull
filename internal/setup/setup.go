@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -21,6 +22,8 @@ import (
 )
 
 var ErrOnePasswordUnavailable = errors.New("1password unavailable")
+
+var tomlBareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type Request struct {
 	Directory           string
@@ -36,6 +39,7 @@ type Request struct {
 	SelectPackageScript func([]string, string) (string, error)
 	Validate            []string
 	Local               bool
+	SelectedInputs      []string
 	Confirm             bool
 	RemoveLegacyEnv     bool
 	ConfirmRemoveEnv    bool
@@ -62,6 +66,7 @@ type PlaintextInput struct {
 	Profile    string
 	Selected   bool
 	Precedence string
+	Variables  []string
 }
 
 type DeveloperCommand struct {
@@ -79,6 +84,9 @@ func Run(request Request) error {
 	}
 	legacyEnvPath := filepath.Join(request.Directory, ".env")
 	inputs := detectPlaintextInputs(request.Directory)
+	if err := selectPlaintextInputs(inputs, request.SelectedInputs); err != nil {
+		return err
+	}
 	selectSource(&request, len(inputs) > 0)
 	if request.ProjectID == "" {
 		projectID, err := defaultProjectID(request.Directory)
@@ -103,7 +111,15 @@ func Run(request Request) error {
 		request.PackageScript = selection
 	}
 
-	config, err := plan(request)
+	var localProfiles map[string]map[string]string
+	if request.Local {
+		var err error
+		localProfiles, err = composeLocalProfiles(request.Directory, inputs)
+		if err != nil {
+			return err
+		}
+	}
+	config, err := plan(request, localProfiles)
 	if err != nil {
 		return err
 	}
@@ -128,26 +144,22 @@ func Run(request Request) error {
 			return err
 		}
 	}
-	var localSecrets map[string]string
 	if request.Local {
 		if request.Store == nil {
 			return fmt.Errorf("setup: local credential store is unavailable")
 		}
-		data, err := os.ReadFile(legacyEnvPath)
-		if err != nil {
-			return fmt.Errorf("setup: read legacy .env: %w", err)
-		}
-		localSecrets, err = parser.Parse(data)
-		if err != nil {
-			return fmt.Errorf("setup: import legacy .env: %w", err)
+		if len(localProfiles) == 0 {
+			return fmt.Errorf("setup: select at least one plaintext input for local setup")
 		}
 		if len(request.Validate) > 0 {
-			if err := runValidation(request, localSecrets); err != nil {
+			if err := runValidation(request, localProfiles["default"]); err != nil {
 				return fmt.Errorf("setup: validation failed: %w", err)
 			}
 		}
-		if err := request.Store.Put(request.ProjectID, "default", localSecrets); err != nil {
-			return fmt.Errorf("setup: save local secret set: %w", err)
+		for profile, secrets := range localProfiles {
+			if err := request.Store.Put(request.ProjectID, profile, secrets); err != nil {
+				return fmt.Errorf("setup: save local profile %q: %w", profile, err)
+			}
 		}
 	}
 
@@ -155,7 +167,7 @@ func Run(request Request) error {
 		return fmt.Errorf("setup: write inject.toml: %w", err)
 	}
 	if !request.Local {
-		if err := runValidation(request, localSecrets); err != nil {
+		if err := runValidation(request, nil); err != nil {
 			return fmt.Errorf("setup: validation failed: %w", err)
 		}
 	}
@@ -226,6 +238,9 @@ func previewPlan(output io.Writer, plan Plan) {
 			details += "; precedence " + input.Precedence
 		}
 		fmt.Fprintf(output, "Plaintext input: %s (%s)\n", input.Name, details)
+		if input.Selected {
+			fmt.Fprintf(output, "Variables for profile %s: %s\n", input.Profile, strings.Join(input.Variables, ", "))
+		}
 	}
 	for _, command := range plan.DeveloperCommands {
 		if command.Default {
@@ -283,6 +298,70 @@ func detectPlaintextInputs(directory string) []PlaintextInput {
 		inputs = append(inputs, input)
 	}
 	return inputs
+}
+
+func selectPlaintextInputs(inputs []PlaintextInput, selected []string) error {
+	if selected == nil {
+		return nil
+	}
+	selectedNames := make(map[string]bool, len(selected)+1)
+	for _, name := range selected {
+		if selectedNames[name] {
+			return fmt.Errorf("setup: plaintext input %q selected more than once", name)
+		}
+		selectedNames[name] = true
+	}
+	if hasPlaintextInput(inputs, ".env") && len(selectedNames) > 0 {
+		selectedNames[".env"] = true
+	}
+	for index := range inputs {
+		inputs[index].Selected = selectedNames[inputs[index].Name]
+		delete(selectedNames, inputs[index].Name)
+	}
+	for name := range selectedNames {
+		return fmt.Errorf("setup: plaintext input %q is not available", name)
+	}
+	return nil
+}
+
+func composeLocalProfiles(directory string, inputs []PlaintextInput) (map[string]map[string]string, error) {
+	profiles := make(map[string]map[string]string)
+	var base map[string]string
+	for index := range inputs {
+		if !inputs[index].Selected {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(directory, inputs[index].Name))
+		if err != nil {
+			return nil, fmt.Errorf("setup: read plaintext input %q: %w", inputs[index].Name, err)
+		}
+		secrets, err := parser.Parse(data)
+		if err != nil {
+			return nil, fmt.Errorf("setup: import plaintext input %q: %w", inputs[index].Name, err)
+		}
+		if inputs[index].Name == ".env" {
+			base = secrets
+		}
+		complete := make(map[string]string, len(base)+len(secrets))
+		for name, value := range base {
+			complete[name] = value
+		}
+		for name, value := range secrets {
+			complete[name] = value
+		}
+		inputs[index].Variables = sortedKeys(complete)
+		profiles[inputs[index].Profile] = complete
+	}
+	return profiles, nil
+}
+
+func sortedKeys[Value any](values map[string]Value) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func isPlaintextInputName(name string) bool {
@@ -458,7 +537,7 @@ func checkOnePassword(request Request) error {
 	return nil
 }
 
-func plan(request Request) (project.Config, error) {
+func plan(request Request, localProfiles map[string]map[string]string) (project.Config, error) {
 	profile := project.Profile{
 		Provider: effectiveProvider(request), Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
 	}
@@ -470,6 +549,12 @@ func plan(request Request) (project.Config, error) {
 		ProjectID:     request.ProjectID,
 		Profiles:      map[string]project.Profile{"default": profile},
 		Commands:      map[string]project.Binding{},
+	}
+	if request.Local && len(localProfiles) > 0 {
+		config.Profiles = make(map[string]project.Profile, len(localProfiles))
+		for name := range localProfiles {
+			config.Profiles[name] = project.Profile{Provider: "local"}
+		}
 	}
 	if request.PackageScript == "" && request.Binding == "" {
 		return config, nil
@@ -493,20 +578,22 @@ func plan(request Request) (project.Config, error) {
 }
 
 func encodeConfig(config project.Config) ([]byte, error) {
-	profile := config.Profiles["default"]
-	data := []byte(fmt.Sprintf("format_version = 1\nproject_id = %q\n\n[profiles.default]\nprovider = %q\n", config.ProjectID, profile.Provider))
-	if profile.Provider == "1password" {
-		data = append(data, fmt.Sprintf("account = %q\nvault = %q\n", profile.Account, profile.Vault)...)
+	data := []byte(fmt.Sprintf("format_version = 1\nproject_id = %q\n", config.ProjectID))
+	for _, name := range sortedKeys(config.Profiles) {
+		profile := config.Profiles[name]
+		data = append(data, fmt.Sprintf("\n[profiles.%s]\nprovider = %q\n", tomlKey(name), profile.Provider)...)
+		if profile.Provider == "1password" {
+			data = append(data, fmt.Sprintf("account = %q\nvault = %q\n", profile.Account, profile.Vault)...)
+		}
+		if profile.Provider == "local" {
+			continue
+		}
+		if profile.ItemID != "" {
+			data = append(data, fmt.Sprintf("item_id = %q\n", profile.ItemID)...)
+		} else {
+			data = append(data, fmt.Sprintf("item = %q\n", profile.Item)...)
+		}
 	}
-	if profile.Provider == "local" {
-		goto bindings
-	}
-	if profile.ItemID != "" {
-		data = append(data, fmt.Sprintf("item_id = %q\n", profile.ItemID)...)
-	} else {
-		data = append(data, fmt.Sprintf("item = %q\n", profile.Item)...)
-	}
-bindings:
 	for name, binding := range config.Commands {
 		command, err := json.Marshal(binding.Command)
 		if err != nil {
@@ -518,6 +605,13 @@ bindings:
 		return nil, fmt.Errorf("setup: invalid planned configuration: %w", err)
 	}
 	return data, nil
+}
+
+func tomlKey(name string) string {
+	if tomlBareKey.MatchString(name) {
+		return name
+	}
+	return fmt.Sprintf("%q", name)
 }
 
 func validatePackageScript(directory, script string) error {

@@ -308,6 +308,137 @@ func TestRunImportsLegacyEnvIntoLocalProfile(t *testing.T) {
 	}
 }
 
+func TestRunComposesSelectedLocalProfiles(t *testing.T) {
+	directory := t.TempDir()
+	for name, contents := range map[string]string{
+		".env":         "DATABASE_URL=base-database\nAPI_TOKEN=base-token\n",
+		".env.staging": "API_TOKEN=staging-token\nFEATURE_FLAG=enabled\n",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	credentialStore := store.NewMemory()
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{
+		Directory:      directory,
+		ProjectID:      "billing-api",
+		Local:          true,
+		SelectedInputs: []string{".env", ".env.staging"},
+		Confirm:        true,
+		Store:          credentialStore,
+		Output:         &output,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for profile, want := range map[string]map[string]string{
+		"default": {"DATABASE_URL": "base-database", "API_TOKEN": "base-token"},
+		"staging": {"DATABASE_URL": "base-database", "API_TOKEN": "staging-token", "FEATURE_FLAG": "enabled"},
+	} {
+		got, err := credentialStore.Get("billing-api", profile)
+		if err != nil {
+			t.Fatalf("Get(%q) error = %v", profile, err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("Get(%q) = %q, want %q", profile, got, want)
+		}
+	}
+
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := output.String()
+	for _, want := range []string{
+		"[profiles.default]", "[profiles.staging]",
+		"Variables for profile default: API_TOKEN, DATABASE_URL",
+		"Variables for profile staging: API_TOKEN, DATABASE_URL, FEATURE_FLAG",
+		"precedence .env < .env.staging",
+	} {
+		if !strings.Contains(string(config)+preview, want) {
+			t.Errorf("config and preview = %q, want %q", string(config)+preview, want)
+		}
+	}
+	for _, secret := range []string{"base-database", "base-token", "staging-token", "enabled"} {
+		if strings.Contains(preview, secret) || bytes.Contains(config, []byte(secret)) {
+			t.Errorf("secret %q leaked into preview or configuration", secret)
+		}
+	}
+}
+
+func TestRunRejectsInvalidSelectedPlaintextInputsBeforeStorage(t *testing.T) {
+	tests := []struct {
+		name        string
+		variantName string
+		variant     string
+		wantError   string
+	}{
+		{
+			name:        "duplicate variable",
+			variantName: ".env.staging",
+			variant:     "TOKEN=first-secret\nTOKEN=second-secret\n",
+			wantError:   `duplicates environment key "TOKEN"`,
+		},
+		{
+			name:        "malformed variable",
+			variantName: ".env.staging",
+			variant:     "NOT-VALID=private-value\n",
+			wantError:   `invalid environment key "NOT-VALID"`,
+		},
+		{
+			name:        "invalid profile name",
+			variantName: ".env.not valid",
+			variant:     "TOKEN=private-value\n",
+			wantError:   `invalid profile name "not valid"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for name, contents := range map[string]string{
+				".env":           "TOKEN=base-secret\n",
+				test.variantName: test.variant,
+			} {
+				if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			credentialStore := store.NewMemory()
+			var output bytes.Buffer
+
+			err := setup.Run(setup.Request{
+				Directory:      directory,
+				ProjectID:      "billing-api",
+				Local:          true,
+				SelectedInputs: []string{test.variantName},
+				Confirm:        true,
+				Store:          credentialStore,
+				Output:         &output,
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Run() error = %v, want error containing %q", err, test.wantError)
+			}
+			for _, secret := range []string{"base-secret", "first-secret", "second-secret", "private-value"} {
+				if strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
+					t.Errorf("secret %q leaked through error or output", secret)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+				t.Errorf("inject.toml stat error = %v, want no configuration written", err)
+			}
+			for _, profile := range []string{"default", "staging", "not valid"} {
+				if _, err := credentialStore.Get("billing-api", profile); err == nil {
+					t.Errorf("Get(%q) error = nil, want unavailable secret set", profile)
+				}
+			}
+		})
+	}
+}
+
 func TestRunDefaultsToLocalMigrationWhenLegacyEnvExists(t *testing.T) {
 	directory := t.TempDir()
 	envPath := filepath.Join(directory, ".env")
