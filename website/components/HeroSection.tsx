@@ -8,7 +8,7 @@ import TerminalAnimation from "@/components/TerminalAnimation";
 const commands = {
   mac: "brew tap dynamicHarsh/tap && brew install inject",
   windows:
-    "scoop bucket add env-pull https://github.com/dynamicHarsh/scoop-bucket && scoop install inject",
+    "scoop bucket add inject https://github.com/dynamicHarsh/scoop-bucket && scoop install inject",
 };
 
 export default function HeroSection() {

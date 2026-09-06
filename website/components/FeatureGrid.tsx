@@ -9,7 +9,7 @@ const features = [
     title: "Sub-shell Injection",
     description: (
       <>
-        <span className="font-mono text-zinc-300">env-pull</span> wraps the
+        <span className="font-mono text-zinc-300">inject</span> wraps the
         process and injects secrets directly into memory. They vanish when the
         terminal closes.
       </>
@@ -21,7 +21,7 @@ const features = [
     description: (
       <>
         AWS SDK & 1Password IPC integration. If your CLI is logged in,{" "}
-        <span className="font-mono text-zinc-300">env-pull</span> is logged in.
+        <span className="font-mono text-zinc-300">inject</span> is logged in.
       </>
     ),
   },

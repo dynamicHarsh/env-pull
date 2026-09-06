@@ -6,9 +6,9 @@ import EnterpriseWaitlist from "@/components/EnterpriseWaitlist";
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "env-pull",
+  name: "inject",
   applicationCategory: "DeveloperApplication",
-  operatingSystem: "macOS, Windows, Linux",
+  operatingSystem: "macOS, Linux",
   offers: {
     "@type": "Offer",
     price: "0",

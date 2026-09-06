@@ -20,7 +20,7 @@ export default function EnterpriseWaitlist() {
           Enterprise
         </p>
         <h2 className="text-4xl md:text-5xl font-bold tracking-tighter text-zinc-100 mb-4 leading-tight">
-          env-pull Enterprise
+          inject Enterprise
           <br />
           Control Plane
         </h2>

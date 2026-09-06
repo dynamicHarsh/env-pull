@@ -155,7 +155,7 @@ export default function ArchitectureSection() {
           <Arrow />
           <FlowNode
             icon={Cpu}
-            label="env-pull (Memory)"
+            label="inject (Memory)"
             sublabel="secrets injected via process env"
             accent
           />

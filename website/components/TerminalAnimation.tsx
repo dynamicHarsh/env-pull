@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const COMMAND = "$ env-pull run --aws-secret npm run dev";
+const COMMAND = "$ inject run --aws-secret npm run dev";
 const CHAR_DELAY_MS = 42;
 
 export default function TerminalAnimation() {
@@ -66,7 +66,7 @@ export default function TerminalAnimation() {
         <span className="w-3 h-3 rounded-full bg-zinc-700/80" />
         <span className="w-3 h-3 rounded-full bg-zinc-700/80" />
         <span className="flex-1 text-center text-xs font-mono text-zinc-500 select-none">
-          bash — env-pull
+          bash — inject
         </span>
       </div>
 
@@ -90,7 +90,7 @@ export default function TerminalAnimation() {
               transition={{ duration: 0.35 }}
               className="mt-2 text-terminal-green"
             >
-              [env-pull] Injected 14 secrets into memory.
+              [inject] Injected 14 secrets into memory.
             </motion.div>
           )}
         </AnimatePresence>

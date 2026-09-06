@@ -7,7 +7,7 @@ export default function Footer() {
     <footer className="border-t border-zinc-900 py-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <p className="text-xs text-zinc-500 font-mono">
-          &copy; {new Date().getFullYear()} env-pull. All rights reserved.
+          &copy; {new Date().getFullYear()} inject. All rights reserved.
         </p>
 
         <ul className="flex items-center gap-6">
