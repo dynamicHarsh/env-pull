@@ -91,8 +91,9 @@ export default function HowItWorks({
   return (
     <section
       id="how-it-works"
-      className="w-full border-t border-zinc-900 scroll-mt-24"
+      className="w-full scroll-mt-24"
     >
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
       <div className="max-w-6xl mx-auto px-4 py-24 text-center">
         <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
           How it works

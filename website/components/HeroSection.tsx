@@ -76,8 +76,29 @@ export default function HeroSection({ workflowMode, setWorkflowMode }: HeroSecti
         ))}
       </div>
 
+      {/* Install pill */}
+      <div className="flex items-center justify-between bg-[#18181b] border border-zinc-800 rounded-full px-5 py-3 w-full max-w-2xl mx-auto overflow-hidden mb-6">
+        <span className="font-mono text-sm text-zinc-300 overflow-x-auto whitespace-nowrap scrollbar-hide flex-grow mr-4">
+          {INSTALL_CMD}
+        </span>
+        <motion.button
+          onClick={handleCopy}
+          aria-label="Copy install command"
+          className="shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          transition={{ type: "spring", stiffness: 400, damping: 17 }}
+        >
+          {copied ? (
+            <Check className="w-4 h-4 text-terminal-green" />
+          ) : (
+            <Copy className="w-4 h-4" />
+          )}
+        </motion.button>
+      </div>
+
       {/* Workflow toggle */}
-      <div className="flex items-center justify-center space-x-1 bg-zinc-900/50 p-1 rounded-full mb-3 w-max mx-auto border border-zinc-800">
+      <div className="flex items-center justify-center space-x-1 bg-zinc-900/50 p-1 rounded-full mb-10 w-max mx-auto border border-zinc-800">
         {([
           { key: "local" as const, label: "Local .env" },
           { key: "onepassword" as const, label: "1Password" },
@@ -99,27 +120,6 @@ export default function HeroSection({ workflowMode, setWorkflowMode }: HeroSecti
             </span>
           </button>
         ))}
-      </div>
-
-      {/* Install pill */}
-      <div className="flex items-center justify-between bg-[#18181b] border border-zinc-800 rounded-full px-5 py-3 w-full max-w-2xl mx-auto overflow-hidden mb-16">
-        <span className="font-mono text-sm text-zinc-300 overflow-x-auto whitespace-nowrap scrollbar-hide flex-grow mr-4">
-          {INSTALL_CMD}
-        </span>
-        <motion.button
-          onClick={handleCopy}
-          aria-label="Copy install command"
-          className="shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          transition={{ type: "spring", stiffness: 400, damping: 17 }}
-        >
-          {copied ? (
-            <Check className="w-4 h-4 text-terminal-green" />
-          ) : (
-            <Copy className="w-4 h-4" />
-          )}
-        </motion.button>
       </div>
 
       {/* Terminal demo */}

@@ -54,9 +54,21 @@ const cardVariants = {
 
 export default function FeatureGrid() {
   return (
-    <section id="features" className="w-full border-t border-zinc-900 scroll-mt-24">
+    <section id="features" className="w-full scroll-mt-24">
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <div className="max-w-6xl mx-auto px-4 pt-24 pb-0 text-center">
+        <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
+          Why inject
+        </p>
+        <h2 className="text-4xl md:text-5xl font-bold tracking-tighter text-zinc-100 mb-6 leading-tight">
+          Why inject?
+        </h2>
+        <p className="text-lg text-zinc-400 leading-relaxed max-w-2xl mx-auto">
+          Everything your <span className="font-mono text-zinc-300">.env</span> does, without the <span className="font-mono text-zinc-300">.env</span>.
+        </p>
+      </div>
       <motion.div
-        className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto px-4 py-24"
+        className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto px-4 pt-16 pb-24"
         variants={containerVariants}
         initial="hidden"
         whileInView="visible"

@@ -32,8 +32,9 @@ export default function GetStartedCTA() {
   }
 
   return (
-    <section id="get-started" className="w-full bg-zinc-900/30 border-y border-zinc-800 py-24 scroll-mt-24">
-      <div className="max-w-3xl mx-auto px-4 text-center">
+    <section id="get-started" className="w-full bg-zinc-900/30 scroll-mt-24">
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <div className="max-w-3xl mx-auto px-4 text-center py-24">
         <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
           Get Started
         </p>
@@ -70,6 +71,7 @@ export default function GetStartedCTA() {
           <ArrowRight size={14} />
         </Link>
       </div>
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
     </section>
   );
 }
