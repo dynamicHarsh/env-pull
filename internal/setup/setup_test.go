@@ -2,6 +2,7 @@ package setup_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -351,15 +352,20 @@ func TestRunComposesSelectedLocalProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, want := range []string{"[profiles.default]", "[profiles.staging]"} {
+		if !bytes.Contains(config, []byte(want)) {
+			t.Errorf("inject.toml = %q, want %q", config, want)
+		}
+	}
 	preview := output.String()
 	for _, want := range []string{
-		"[profiles.default]", "[profiles.staging]",
+		".env", ".env.staging", "profile default", "profile staging",
 		"Variables for profile default: API_TOKEN, DATABASE_URL",
 		"Variables for profile staging: API_TOKEN, DATABASE_URL, FEATURE_FLAG",
 		"precedence .env < .env.staging",
 	} {
-		if !strings.Contains(string(config)+preview, want) {
-			t.Errorf("config and preview = %q, want %q", string(config)+preview, want)
+		if !strings.Contains(preview, want) {
+			t.Errorf("preview = %q, want %q", preview, want)
 		}
 	}
 	for _, secret := range []string{"base-database", "base-token", "staging-token", "enabled"} {
@@ -371,38 +377,46 @@ func TestRunComposesSelectedLocalProfiles(t *testing.T) {
 
 func TestRunRejectsInvalidSelectedPlaintextInputsBeforeStorage(t *testing.T) {
 	tests := []struct {
-		name        string
-		variantName string
-		variant     string
-		wantError   string
+		name           string
+		files          map[string]string
+		selectedInputs []string
+		wantError      string
+		secretValue    string
 	}{
 		{
-			name:        "duplicate variable",
-			variantName: ".env.staging",
-			variant:     "TOKEN=first-secret\nTOKEN=second-secret\n",
-			wantError:   `duplicates environment key "TOKEN"`,
+			name:           "duplicate variable",
+			files:          map[string]string{".env": "TOKEN=base-secret\n", ".env.staging": "TOKEN=first-secret\nTOKEN=second-secret\n"},
+			selectedInputs: []string{".env.staging"},
+			wantError:      `duplicates environment key "TOKEN"`,
+			secretValue:    "second-secret",
 		},
 		{
-			name:        "malformed variable",
-			variantName: ".env.staging",
-			variant:     "NOT-VALID=private-value\n",
-			wantError:   `invalid environment key "NOT-VALID"`,
+			name:           "malformed variable",
+			files:          map[string]string{".env": "TOKEN=base-secret\n", ".env.staging": "NOT-VALID=private-value\n"},
+			selectedInputs: []string{".env.staging"},
+			wantError:      `invalid environment key "NOT-VALID"`,
+			secretValue:    "private-value",
 		},
 		{
-			name:        "invalid profile name",
-			variantName: ".env.not valid",
-			variant:     "TOKEN=private-value\n",
-			wantError:   `invalid profile name "not valid"`,
+			name:           "invalid profile name",
+			files:          map[string]string{".env": "TOKEN=base-secret\n", ".env.not valid": "TOKEN=private-value\n"},
+			selectedInputs: []string{".env.not valid"},
+			wantError:      `invalid profile name "not valid"`,
+			secretValue:    "private-value",
+		},
+		{
+			name:           "unavailable input",
+			files:          map[string]string{".env": "TOKEN=base-secret\n"},
+			selectedInputs: []string{".env.missing"},
+			wantError:      `plaintext input ".env.missing" is not available`,
+			secretValue:    "base-secret",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
-			for name, contents := range map[string]string{
-				".env":           "TOKEN=base-secret\n",
-				test.variantName: test.variant,
-			} {
+			for name, contents := range test.files {
 				if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -414,7 +428,7 @@ func TestRunRejectsInvalidSelectedPlaintextInputsBeforeStorage(t *testing.T) {
 				Directory:      directory,
 				ProjectID:      "billing-api",
 				Local:          true,
-				SelectedInputs: []string{test.variantName},
+				SelectedInputs: test.selectedInputs,
 				Confirm:        true,
 				Store:          credentialStore,
 				Output:         &output,
@@ -422,10 +436,8 @@ func TestRunRejectsInvalidSelectedPlaintextInputsBeforeStorage(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("Run() error = %v, want error containing %q", err, test.wantError)
 			}
-			for _, secret := range []string{"base-secret", "first-secret", "second-secret", "private-value"} {
-				if strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
-					t.Errorf("secret %q leaked through error or output", secret)
-				}
+			if strings.Contains(err.Error(), test.secretValue) || strings.Contains(output.String(), test.secretValue) {
+				t.Errorf("secret value leaked through error or output")
 			}
 			if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
 				t.Errorf("inject.toml stat error = %v, want no configuration written", err)
@@ -680,10 +692,10 @@ func TestRunUsesExplicitBindingForUnsafePackageScript(t *testing.T) {
 	}
 }
 
-func TestRunBindsPackageScriptWithoutChangingPackageManifest(t *testing.T) {
+func TestRunPreservesPackageScriptAndLifecycleHooksBehindInjectWrapper(t *testing.T) {
 	directory := t.TempDir()
 	packagePath := filepath.Join(directory, "package.json")
-	contents := []byte(`{"scripts":{"dev":"vite --host 0.0.0.0 | tee app.log"}}`)
+	contents := []byte(`{"scripts":{"predev":"printf '%s\\n' \\\"$TOKEN\\\"","dev":"vite --host 0.0.0.0 | tee app.log","postdev":"node -e \\\"console.log('done')\\\"","test":"go test ./..."}}`)
 	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -695,15 +707,106 @@ func TestRunBindsPackageScriptWithoutChangingPackageManifest(t *testing.T) {
 	if err := setup.Run(request); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got, err := os.ReadFile(packagePath); err != nil || !bytes.Equal(got, contents) {
-		t.Errorf("package.json = %q, %v; want unchanged", got, err)
+	manifestData, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatalf("package.json is invalid: %v", err)
+	}
+	wantScripts := map[string]string{
+		"dev":                     `inject __run-package-script "dev"`,
+		"inject:original:predev":  `printf '%s\n' \"$TOKEN\"`,
+		"inject:original:dev":     "vite --host 0.0.0.0 | tee app.log",
+		"inject:original:postdev": `node -e \"console.log('done')\"`,
+		"test":                    "go test ./...",
+	}
+	if !reflect.DeepEqual(manifest.Scripts, wantScripts) {
+		t.Errorf("scripts = %#v, want %#v", manifest.Scripts, wantScripts)
 	}
 	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(config, []byte("[commands.dev]")) || !bytes.Contains(config, []byte(`command = ["npm","run","dev"]`)) {
-		t.Errorf("inject.toml = %q, want npm run dev binding", config)
+	for _, want := range []string{
+		"[script_bindings.dev]",
+		`profile = "default"`,
+		`wrapper = "inject __run-package-script \"dev\""`,
+		`script = "inject:original:dev"`,
+		`original = "vite --host 0.0.0.0 | tee app.log"`,
+		`pre_script = "inject:original:predev"`,
+		`post_script = "inject:original:postdev"`,
+	} {
+		if !bytes.Contains(config, []byte(want)) {
+			t.Errorf("inject.toml = %q, want %q", config, want)
+		}
+	}
+}
+
+func TestRunRejectsReservedPackageScriptCollisionWithoutMutation(t *testing.T) {
+	directory := t.TempDir()
+	packagePath := filepath.Join(directory, "package.json")
+	contents := []byte(`{"scripts":{"dev":"vite","inject:original:dev":"owned by project"}}`)
+	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.Confirm = true
+	request.PackageScripts = []string{"dev"}
+	request.RunValidation = func([]string) error {
+		t.Fatal("validation ran despite reserved-name conflict")
+		return nil
+	}
+
+	err := setup.Run(request)
+	if err == nil || err.Error() != `setup: reserved package script "inject:original:dev" already exists` {
+		t.Fatalf("Run() error = %v, want reserved-name collision", err)
+	}
+	if got, err := os.ReadFile(packagePath); err != nil || !bytes.Equal(got, contents) {
+		t.Errorf("package.json = %q, %v; want unchanged", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration", err)
+	}
+}
+
+func TestRunWrapsEachSelectedPackageScript(t *testing.T) {
+	directory := t.TempDir()
+	packagePath := filepath.Join(directory, "package.json")
+	if err := os.WriteFile(packagePath, []byte(`{"scripts":{"dev":"vite","serve":"http-server","test":"go test ./..."}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := request(directory, io.Discard)
+	request.Confirm = true
+	request.PackageScripts = []string{"dev", "serve"}
+	request.RunValidation = func([]string) error { return nil }
+
+	if err := setup.Run(request); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	data, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for name, original := range map[string]string{"dev": "vite", "serve": "http-server"} {
+		if got := manifest.Scripts[name]; got != `inject __run-package-script "`+name+`"` {
+			t.Errorf("script %q = %q, want inject wrapper", name, got)
+		}
+		if got := manifest.Scripts["inject:original:"+name]; got != original {
+			t.Errorf("preserved script %q = %q, want %q", name, got, original)
+		}
+	}
+	if got := manifest.Scripts["test"]; got != "go test ./..." {
+		t.Errorf("unselected test script = %q, want unchanged", got)
 	}
 }
 
@@ -757,8 +860,8 @@ func TestRunSelectsDefaultPackageScriptBinding(t *testing.T) {
 	if err := setup.Run(request); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got := output.String(); !bytes.Contains([]byte(got), []byte("[commands.dev]")) {
-		t.Errorf("output = %q, want selected dev binding in preview", got)
+	if got := output.String(); !bytes.Contains([]byte(got), []byte("[script_bindings.dev]")) {
+		t.Errorf("output = %q, want selected package script binding in preview", got)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/harsh-sonkar/env-pull/internal/executor"
@@ -36,6 +37,7 @@ type Request struct {
 	Binding             string
 	Command             []string
 	PackageScript       string
+	PackageScripts      []string
 	SelectPackageScript func([]string, string) (string, error)
 	Validate            []string
 	Local               bool
@@ -110,6 +112,9 @@ func Run(request Request) error {
 		}
 		request.PackageScript = selection
 	}
+	if request.PackageScript != "" && len(request.Command) == 0 {
+		request.PackageScripts = append(request.PackageScripts, request.PackageScript)
+	}
 
 	var localProfiles map[string]map[string]string
 	if request.Local {
@@ -163,13 +168,13 @@ func Run(request Request) error {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(request.Directory, project.FileName), configData, 0o644); err != nil {
-		return fmt.Errorf("setup: write inject.toml: %w", err)
-	}
 	if !request.Local {
 		if err := runValidation(request, nil); err != nil {
 			return fmt.Errorf("setup: validation failed: %w", err)
 		}
+	}
+	if err := applyProjectFiles(request.Directory, config, configData); err != nil {
+		return err
 	}
 	fmt.Fprintln(request.Output, "Validation succeeded")
 	if request.RemoveLegacyEnv && hasPlaintextInput(inputs, ".env") {
@@ -213,6 +218,9 @@ func buildPlan(request Request, inputs []PlaintextInput, scripts []string, confi
 	}
 	if request.RemoveLegacyEnv {
 		plan.FileChanges = append(plan.FileChanges, "remove .env after successful validation")
+	}
+	if len(request.PackageScripts) > 0 {
+		plan.FileChanges = append(plan.FileChanges, "modify package.json scripts")
 	}
 	return plan
 }
@@ -318,8 +326,10 @@ func selectPlaintextInputs(inputs []PlaintextInput, selected []string) error {
 		inputs[index].Selected = selectedNames[inputs[index].Name]
 		delete(selectedNames, inputs[index].Name)
 	}
-	for name := range selectedNames {
-		return fmt.Errorf("setup: plaintext input %q is not available", name)
+	if len(selectedNames) > 0 {
+		for name := range selectedNames {
+			return fmt.Errorf("setup: plaintext input %q is not available", name)
+		}
 	}
 	return nil
 }
@@ -514,6 +524,9 @@ func validateRequest(request Request) error {
 	if strings.TrimSpace(request.ItemID) == "" && strings.TrimSpace(request.Item) == "" {
 		return fmt.Errorf("setup: a 1Password item ID or item name is required")
 	}
+	if len(request.PackageScripts) > 0 && request.Binding != "" {
+		return fmt.Errorf("setup: package scripts and explicit binding cannot be selected together")
+	}
 	if request.PackageScript != "" && request.Binding != "" && request.Binding != request.PackageScript {
 		return fmt.Errorf("setup: package script and binding must have the same name")
 	}
@@ -545,10 +558,11 @@ func plan(request Request, localProfiles map[string]map[string]string) (project.
 		profile = project.Profile{Provider: "local"}
 	}
 	config := project.Config{
-		FormatVersion: 1,
-		ProjectID:     request.ProjectID,
-		Profiles:      map[string]project.Profile{"default": profile},
-		Commands:      map[string]project.Binding{},
+		FormatVersion:  1,
+		ProjectID:      request.ProjectID,
+		Profiles:       map[string]project.Profile{"default": profile},
+		Commands:       map[string]project.Binding{},
+		ScriptBindings: map[string]project.ScriptBinding{},
 	}
 	if request.Local && len(localProfiles) > 0 {
 		config.Profiles = make(map[string]project.Profile, len(localProfiles))
@@ -556,30 +570,37 @@ func plan(request Request, localProfiles map[string]map[string]string) (project.
 			config.Profiles[name] = project.Profile{Provider: "local"}
 		}
 	}
-	if request.PackageScript == "" && request.Binding == "" {
+	if len(request.PackageScripts) == 0 && request.Binding == "" && request.PackageScript == "" {
+		return config, nil
+	}
+	if len(request.PackageScripts) > 0 {
+		bindings, err := packageScriptBindings(request.Directory, request.PackageScripts)
+		if err != nil {
+			return project.Config{}, err
+		}
+		config.ScriptBindings = bindings
 		return config, nil
 	}
 	binding := request.Binding
 	if binding == "" {
 		binding = request.PackageScript
 	}
-	command := request.Command
 	if request.PackageScript != "" {
 		if err := validatePackageScript(request.Directory, request.PackageScript); err != nil {
 			return project.Config{}, err
 		}
-		command = []string{"npm", "run", request.PackageScript}
 	}
-	if len(command) == 0 {
+	if len(request.Command) == 0 {
 		return project.Config{}, fmt.Errorf("setup: binding %q requires a command", binding)
 	}
-	config.Commands[binding] = project.Binding{Command: command}
+	config.Commands[binding] = project.Binding{Command: request.Command}
 	return config, nil
 }
 
 func encodeConfig(config project.Config) ([]byte, error) {
 	data := []byte(fmt.Sprintf("format_version = 1\nproject_id = %q\n", config.ProjectID))
-	for _, name := range sortedKeys(config.Profiles) {
+	profileNames := sortedKeys(config.Profiles)
+	for _, name := range profileNames {
 		profile := config.Profiles[name]
 		data = append(data, fmt.Sprintf("\n[profiles.%s]\nprovider = %q\n", tomlKey(name), profile.Provider)...)
 		if profile.Provider == "1password" {
@@ -600,6 +621,16 @@ func encodeConfig(config project.Config) ([]byte, error) {
 			return nil, err
 		}
 		data = append(data, fmt.Sprintf("\n[commands.%s]\nprofile = \"default\"\ncommand = %s\n", name, command)...)
+	}
+	for _, name := range sortedKeys(config.ScriptBindings) {
+		binding := config.ScriptBindings[name]
+		data = append(data, fmt.Sprintf("\n[script_bindings.%s]\nprofile = %q\npackage_manager = %q\nwrapper = %q\nscript = %q\noriginal = %q\n", tomlKey(name), binding.Profile, binding.PackageManager, binding.Wrapper, binding.Script, binding.Original)...)
+		if binding.PreScript != "" {
+			data = append(data, fmt.Sprintf("pre_script = %q\npre_original = %q\n", binding.PreScript, binding.PreOriginal)...)
+		}
+		if binding.PostScript != "" {
+			data = append(data, fmt.Sprintf("post_script = %q\npost_original = %q\n", binding.PostScript, binding.PostOriginal)...)
+		}
 	}
 	if _, err := project.Parse(data); err != nil {
 		return nil, fmt.Errorf("setup: invalid planned configuration: %w", err)
@@ -629,6 +660,116 @@ func validatePackageScript(directory, script string) error {
 		return fmt.Errorf("setup: package.json has no %q script", script)
 	}
 	return nil
+}
+
+func packageScriptBindings(directory string, selected []string) (map[string]project.ScriptBinding, error) {
+	data, err := os.ReadFile(filepath.Join(directory, "package.json"))
+	if err != nil {
+		return nil, fmt.Errorf("setup: read package.json: %w", err)
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("setup: invalid package.json: %w", err)
+	}
+	manager := detectPackageManager(directory)
+	bindings := make(map[string]project.ScriptBinding, len(selected))
+	for _, name := range selected {
+		original, exists := manifest.Scripts[name]
+		if !exists {
+			return nil, fmt.Errorf("setup: package.json has no %q script", name)
+		}
+		if _, duplicate := bindings[name]; duplicate {
+			return nil, fmt.Errorf("setup: package script %q selected more than once", name)
+		}
+		binding := project.ScriptBinding{
+			Profile: "default", PackageManager: manager,
+			Wrapper: "inject __run-package-script " + strconv.Quote(name),
+			Script:  reservedScriptName(name), Original: original,
+		}
+		if value, exists := manifest.Scripts["pre"+name]; exists {
+			binding.PreScript = reservedScriptName("pre" + name)
+			binding.PreOriginal = value
+		}
+		if value, exists := manifest.Scripts["post"+name]; exists {
+			binding.PostScript = reservedScriptName("post" + name)
+			binding.PostOriginal = value
+		}
+		for _, generated := range []string{binding.Script, binding.PreScript, binding.PostScript} {
+			if generated == "" {
+				continue
+			}
+			for _, collision := range []string{generated, "pre" + generated, "post" + generated} {
+				if _, exists := manifest.Scripts[collision]; exists {
+					return nil, fmt.Errorf("setup: reserved package script %q already exists", collision)
+				}
+			}
+		}
+		bindings[name] = binding
+	}
+	return bindings, nil
+}
+
+func reservedScriptName(name string) string { return "inject:original:" + name }
+
+func applyProjectFiles(directory string, config project.Config, configData []byte) error {
+	manifestPath := filepath.Join(directory, "package.json")
+	var originalManifest []byte
+	if len(config.ScriptBindings) > 0 {
+		var err error
+		originalManifest, err = os.ReadFile(manifestPath)
+		if err != nil {
+			return fmt.Errorf("setup: read package.json: %w", err)
+		}
+		updatedManifest, err := rewritePackageScripts(originalManifest, config.ScriptBindings)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(manifestPath, updatedManifest, 0o644); err != nil {
+			return fmt.Errorf("setup: write package.json: %w", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(directory, project.FileName), configData, 0o644); err != nil {
+		if originalManifest != nil {
+			_ = os.WriteFile(manifestPath, originalManifest, 0o644)
+		}
+		return fmt.Errorf("setup: write inject.toml: %w", err)
+	}
+	return nil
+}
+
+func rewritePackageScripts(data []byte, bindings map[string]project.ScriptBinding) ([]byte, error) {
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("setup: invalid package.json: %w", err)
+	}
+	var scripts map[string]string
+	if err := json.Unmarshal(manifest["scripts"], &scripts); err != nil {
+		return nil, fmt.Errorf("setup: invalid package.json scripts: %w", err)
+	}
+	for name, binding := range bindings {
+		scripts[binding.Script] = binding.Original
+		if binding.PreScript != "" {
+			delete(scripts, "pre"+name)
+			scripts[binding.PreScript] = binding.PreOriginal
+		}
+		if binding.PostScript != "" {
+			delete(scripts, "post"+name)
+			scripts[binding.PostScript] = binding.PostOriginal
+		}
+		scripts[name] = binding.Wrapper
+	}
+	scriptData, err := json.Marshal(scripts)
+	if err != nil {
+		return nil, err
+	}
+	manifest["scripts"] = scriptData
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(updated, '\n'), nil
 }
 
 func candidatePackageScripts(directory string) []string {

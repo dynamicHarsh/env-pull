@@ -18,11 +18,12 @@ const FileName = "inject.toml"
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type Config struct {
-	FormatVersion int                `toml:"format_version"`
-	ProjectID     string             `toml:"project_id"`
-	Cache         CachePolicy        `toml:"cache"`
-	Profiles      map[string]Profile `toml:"profiles"`
-	Commands      map[string]Binding `toml:"commands"`
+	FormatVersion  int                      `toml:"format_version"`
+	ProjectID      string                   `toml:"project_id"`
+	Cache          CachePolicy              `toml:"cache"`
+	Profiles       map[string]Profile       `toml:"profiles"`
+	Commands       map[string]Binding       `toml:"commands"`
+	ScriptBindings map[string]ScriptBinding `toml:"script_bindings"`
 }
 
 type CachePolicy struct {
@@ -56,6 +57,18 @@ type Profile struct {
 type Binding struct {
 	Profile string   `toml:"profile"`
 	Command []string `toml:"command"`
+}
+
+type ScriptBinding struct {
+	Profile        string `toml:"profile"`
+	PackageManager string `toml:"package_manager"`
+	Wrapper        string `toml:"wrapper"`
+	Script         string `toml:"script"`
+	Original       string `toml:"original"`
+	PreScript      string `toml:"pre_script"`
+	PreOriginal    string `toml:"pre_original"`
+	PostScript     string `toml:"post_script"`
+	PostOriginal   string `toml:"post_original"`
 }
 
 func Load(path string) (Config, error) {
@@ -104,6 +117,14 @@ func (config Config) Binding(name string) (Binding, error) {
 	return binding, nil
 }
 
+func (config Config) ScriptBinding(name string) (ScriptBinding, error) {
+	binding, exists := config.ScriptBindings[name]
+	if !exists {
+		return ScriptBinding{}, fmt.Errorf("project: unknown package script binding %q", name)
+	}
+	return binding, nil
+}
+
 func (config *Config) validate() error {
 	if config.FormatVersion != 1 {
 		return fmt.Errorf("project: format_version must be 1")
@@ -146,6 +167,17 @@ func (config *Config) validate() error {
 		}
 		if _, err := config.Profile(binding.Profile); err != nil {
 			return fmt.Errorf("project: command binding %q: %w", name, err)
+		}
+	}
+	for name, binding := range config.ScriptBindings {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(binding.Wrapper) == "" || strings.TrimSpace(binding.Script) == "" {
+			return fmt.Errorf("project: invalid package script binding %q", name)
+		}
+		if binding.PackageManager != "npm" && binding.PackageManager != "pnpm" && binding.PackageManager != "yarn" && binding.PackageManager != "bun" {
+			return fmt.Errorf("project: package script binding %q has unsupported package manager", name)
+		}
+		if _, err := config.Profile(binding.Profile); err != nil {
+			return fmt.Errorf("project: package script binding %q: %w", name, err)
 		}
 	}
 	return nil

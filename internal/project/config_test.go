@@ -51,6 +51,34 @@ item_id = "abc123"
 	}
 }
 
+func TestParseAcceptsPackageScriptOwnershipMetadata(t *testing.T) {
+	config, err := project.Parse([]byte(`format_version = 1
+project_id = "billing-api"
+
+[profiles.default]
+provider = "local"
+
+[script_bindings."dev:web"]
+profile = "default"
+package_manager = "npm"
+wrapper = "inject __run-package-script \"dev\""
+script = "inject:original:dev"
+original = "vite --host 0.0.0.0 | tee app.log"
+pre_script = "inject:original:predev"
+pre_original = "printf 'ready\\n'"
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	binding, err := config.ScriptBinding("dev:web")
+	if err != nil {
+		t.Fatalf("ScriptBinding() error = %v", err)
+	}
+	if binding.Original != "vite --host 0.0.0.0 | tee app.log" || binding.PreOriginal != `printf 'ready\n'` {
+		t.Errorf("script binding = %#v, want exact restoration values", binding)
+	}
+}
+
 func TestParseAcceptsOptInRemoteCachePolicy(t *testing.T) {
 	config, err := project.Parse([]byte(`format_version = 1
 project_id = "billing-api"
