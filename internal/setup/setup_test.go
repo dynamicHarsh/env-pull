@@ -276,6 +276,42 @@ func TestRunPlansBitwardenSource(t *testing.T) {
 	}
 }
 
+func TestRunAppliesBitwardenSourceWithValidation(t *testing.T) {
+	directory := t.TempDir()
+	validationRan := false
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{
+		Directory: directory,
+		ProjectID: "billing-api",
+		Provider:  "bitwarden",
+		ItemID:    "note-id",
+		Confirm:   true,
+		Validate:  []string{"go", "test", "./..."},
+		RunValidation: func(command []string) error {
+			validationRan = reflect.DeepEqual(command, []string{"go", "test", "./..."})
+			return nil
+		},
+		Output: &output,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !validationRan {
+		t.Error("validation command did not run")
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte(`provider = "bitwarden"`)) || !bytes.Contains(config, []byte(`item_id = "note-id"`)) {
+		t.Errorf("inject.toml = %q, want Bitwarden source", config)
+	}
+	if strings.Contains(output.String(), "secret") {
+		t.Errorf("output = %q, want secret-free output", output.String())
+	}
+}
+
 func TestRunSelectsOnePasswordWhenProviderIsExplicit(t *testing.T) {
 	directory := t.TempDir()
 	var output bytes.Buffer

@@ -33,11 +33,12 @@ var (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Configure inject for a 1Password secret note",
+	Short: "Configure inject for a local or remote secret source",
 	Long: `setup previews a non-secret inject.toml configuration and optional
 command bindings. Selected package scripts are preserved under inject-owned names
-so their existing package-manager commands continue to work. Setup checks the existing op CLI session before changing
-project files for remote sources. A detected .env selects local credential-store
+so their existing package-manager commands continue to work. Setup validates the selected
+provider through its existing CLI authentication context before changing project files.
+A detected .env selects local credential-store
 migration unless a remote provider or reference is selected.
 
 Use --yes to apply the preview. Remote setup requires a finite validation command.
@@ -112,8 +113,8 @@ func init() {
 	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password or bitwarden)")
 	setupCmd.Flags().StringVar(&setupAccount, "account", "", "1Password account")
 	setupCmd.Flags().StringVar(&setupVault, "vault", "", "1Password vault")
-	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable 1Password item ID")
-	setupCmd.Flags().StringVar(&setupItem, "item", "", "1Password item name")
+	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable remote item ID")
+	setupCmd.Flags().StringVar(&setupItem, "item", "", "remote item name")
 	setupCmd.Flags().StringVar(&setupBinding, "binding", "", "explicit command binding name")
 	setupCmd.Flags().StringSliceVar(&setupPackageScripts, "package-script", nil, "package.json script to preserve through injection; repeat for each script")
 	setupCmd.Flags().StringArrayVar(&setupCommand, "command", nil, "binding command argument; repeat for each argument")

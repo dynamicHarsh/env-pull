@@ -587,7 +587,7 @@ func validateRequest(request Request) error {
 		return fmt.Errorf("setup: project ID, 1Password account, and vault are required")
 	}
 	if strings.TrimSpace(request.ItemID) == "" && strings.TrimSpace(request.Item) == "" {
-		return fmt.Errorf("setup: a 1Password item ID or item name is required")
+		return fmt.Errorf("setup: a remote item ID or item name is required")
 	}
 	if len(request.PackageScripts) > 0 && request.Binding != "" {
 		return fmt.Errorf("setup: package scripts and explicit binding cannot be selected together")
