@@ -174,6 +174,101 @@ item_id = "stable-note-id"
 	}
 }
 
+func TestConfiguredPackageScriptRunsLifecycleInsideInjectedProcessTree(t *testing.T) {
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("npm is not installed")
+	}
+	buildDirectory := t.TempDir()
+	binaryPath := filepath.Join(buildDirectory, "inject")
+	build := exec.Command("go", "build", "-o", binaryPath, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+
+	projectDir := t.TempDir()
+	config := `format_version = 1
+project_id = "test-project"
+
+[profiles.default]
+provider = "1password"
+account = "acme"
+vault = "Engineering"
+item_id = "stable-note-id"
+
+[script_bindings.dev]
+profile = "default"
+package_manager = "npm"
+wrapper = "inject __run-package-script \"dev\""
+script = "inject:original:dev"
+original = "printf 'main:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\""
+pre_script = "inject:original:predev"
+pre_original = "printf 'pre:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\""
+post_script = "inject:original:postdev"
+post_original = "printf 'post:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\""
+`
+	manifest := `{"scripts":{"dev":"inject __run-package-script \"dev\"","inject:original:predev":"printf 'pre:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\"","inject:original:dev":"printf 'main:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\"","inject:original:postdev":"printf 'post:%s\\n' \"$TOKEN\" >> \"$ORDER_FILE\""}}`
+	if err := os.WriteFile(filepath.Join(projectDir, "inject.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "package.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opPath := filepath.Join(projectDir, "op")
+	if err := os.WriteFile(opPath, []byte("#!/bin/sh\nprintf '%s\\n' '{\"fields\":[{\"id\":\"notesPlain\",\"value\":\"TOKEN=injected-value\\n\"}]}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	orderPath := filepath.Join(projectDir, "order.log")
+	command := exec.Command("npm", "run", "--silent", "dev")
+	command.Dir = projectDir
+	command.Env = append(os.Environ(),
+		"PATH="+projectDir+string(os.PathListSeparator)+buildDirectory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"ORDER_FILE="+orderPath,
+		"TOKEN=parent-value",
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("npm run dev: %v\n%s", err, output)
+	}
+	order, err := os.ReadFile(orderPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(order), "pre:injected-value\nmain:injected-value\npost:injected-value\n"; got != want {
+		t.Errorf("lifecycle output = %q, want %q", got, want)
+	}
+	if got := os.Getenv("TOKEN"); got == "injected-value" {
+		t.Errorf("parent TOKEN = %q, must remain unchanged", got)
+	}
+
+	if err := os.Remove(orderPath); err != nil {
+		t.Fatal(err)
+	}
+	exitManifest := `{"scripts":{"dev":"inject __run-package-script \"dev\"","inject:original:predev":"exit 0","inject:original:dev":"exit 7","inject:original:postdev":"exit 0"}}`
+	if err := os.WriteFile(filepath.Join(projectDir, "package.json"), []byte(exitManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exitCommand := exec.Command("npm", "run", "--silent", "dev")
+	exitCommand.Dir = projectDir
+	exitCommand.Env = command.Env
+	if output, err := exitCommand.CombinedOutput(); err == nil {
+		t.Fatalf("npm run dev = success, want exit status 7; output: %s", output)
+	} else if exitError, ok := err.(*exec.ExitError); !ok || exitError.ExitCode() != 7 {
+		t.Fatalf("npm run dev error = %v, want exit status 7; output: %s", err, output)
+	}
+
+	if err := os.WriteFile(opPath, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	failed := exec.Command("npm", "run", "--silent", "dev")
+	failed.Dir = projectDir
+	failed.Env = command.Env
+	if output, err := failed.CombinedOutput(); err == nil {
+		t.Fatalf("npm run dev = success with unavailable source; output: %s", output)
+	}
+	if _, err := os.Stat(orderPath); !os.IsNotExist(err) {
+		t.Errorf("lifecycle output stat error = %v, want no process launched", err)
+	}
+}
+
 func TestConfiguredBitwardenRunDoesNotLaunchChildWhenSourceFails(t *testing.T) {
 	binaryPath := filepath.Join(t.TempDir(), "inject")
 	build := exec.Command("go", "build", "-o", binaryPath, ".")

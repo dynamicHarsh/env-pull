@@ -21,10 +21,11 @@ var (
 	setupItemID           string
 	setupItem             string
 	setupBinding          string
-	setupPackageScript    string
+	setupPackageScripts   []string
 	setupCommand          []string
 	setupValidation       []string
 	setupLocal            bool
+	setupSelectedInputs   []string
 	setupConfirm          bool
 	setupRemoveLegacyEnv  bool
 	setupConfirmRemoveEnv bool
@@ -34,8 +35,8 @@ var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Configure inject for a 1Password secret note",
 	Long: `setup previews a non-secret inject.toml configuration and optional
-command binding. Package-script bindings run as npm run <script> without changing
-package.json. It checks the existing op CLI session before changing
+command bindings. Selected package scripts are preserved under inject-owned names
+so their existing package-manager commands continue to work. Setup checks the existing op CLI session before changing
 project files for remote sources. A detected .env selects local credential-store
 migration unless a remote provider or reference is selected.
 
@@ -52,11 +53,12 @@ after a successful validation.`,
 			ItemID:              setupItemID,
 			Item:                setupItem,
 			Binding:             setupBinding,
-			PackageScript:       setupPackageScript,
+			PackageScripts:      setupPackageScripts,
 			SelectPackageScript: selectPackageScript,
 			Command:             setupCommand,
 			Validate:            setupValidation,
 			Local:               setupLocal,
+			SelectedInputs:      setupSelectedInputs,
 			Store:               store.NewSystem(),
 			Confirm:             setupConfirm,
 			RemoveLegacyEnv:     setupRemoveLegacyEnv,
@@ -96,16 +98,17 @@ func selectPackageScript(candidates []string, defaultScript string) (string, err
 
 func init() {
 	setupCmd.Flags().StringVar(&setupProjectID, "project-id", "", "stable project identifier")
-	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password)")
+	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password or bitwarden)")
 	setupCmd.Flags().StringVar(&setupAccount, "account", "", "1Password account")
 	setupCmd.Flags().StringVar(&setupVault, "vault", "", "1Password vault")
 	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable 1Password item ID")
 	setupCmd.Flags().StringVar(&setupItem, "item", "", "1Password item name")
 	setupCmd.Flags().StringVar(&setupBinding, "binding", "", "explicit command binding name")
-	setupCmd.Flags().StringVar(&setupPackageScript, "package-script", "", "package.json script to bind as npm run <script>")
+	setupCmd.Flags().StringSliceVar(&setupPackageScripts, "package-script", nil, "package.json script to preserve through injection; repeat for each script")
 	setupCmd.Flags().StringArrayVar(&setupCommand, "command", nil, "binding command argument; repeat for each argument")
 	setupCmd.Flags().StringArrayVar(&setupValidation, "validate", nil, "finite validation command argument; repeat for each argument")
 	setupCmd.Flags().BoolVar(&setupLocal, "local", false, "force import of a legacy .env into the local credential store")
+	setupCmd.Flags().StringSliceVar(&setupSelectedInputs, "env-file", nil, "plaintext environment input to import; repeat for variants")
 	setupCmd.Flags().BoolVar(&setupConfirm, "yes", false, "apply the previewed project changes")
 	setupCmd.Flags().BoolVar(&setupRemoveLegacyEnv, "remove-env", false, "remove a legacy .env after validation")
 	setupCmd.Flags().BoolVar(&setupConfirmRemoveEnv, "yes-remove-env", false, "confirm removal of a legacy .env")
