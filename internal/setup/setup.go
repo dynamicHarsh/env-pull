@@ -45,6 +45,30 @@ type Request struct {
 	Output              io.Writer
 }
 
+type Plan struct {
+	ProjectID            string
+	Source               string
+	PlaintextInputs      []PlaintextInput
+	DeveloperCommands    []DeveloperCommand
+	ValidationCandidates []string
+	ValidationCommand    []string
+	PackageManager       string
+	FileChanges          []string
+	ConfigData           []byte
+}
+
+type PlaintextInput struct {
+	Name       string
+	Profile    string
+	Selected   bool
+	Precedence string
+}
+
+type DeveloperCommand struct {
+	Name    string
+	Default bool
+}
+
 // Run previews and, after confirmation, applies a non-secret inject configuration.
 func Run(request Request) error {
 	if request.Directory == "" {
@@ -54,8 +78,8 @@ func Run(request Request) error {
 		request.Output = io.Discard
 	}
 	legacyEnvPath := filepath.Join(request.Directory, ".env")
-	_, legacyEnvExists := statFile(legacyEnvPath)
-	selectSource(&request, legacyEnvExists)
+	inputs := detectPlaintextInputs(request.Directory)
+	selectSource(&request, len(inputs) > 0)
 	if request.ProjectID == "" {
 		projectID, err := defaultProjectID(request.Directory)
 		if err != nil {
@@ -66,27 +90,11 @@ func Run(request Request) error {
 	if err := validateRequest(request); err != nil {
 		return err
 	}
-	if !request.Local {
-		if err := checkOnePassword(request); err != nil {
-			fmt.Fprintln(request.Output, "1Password is unavailable; run `op signin` and retry")
-			return err
-		}
-	}
 	if _, exists := statFile(filepath.Join(request.Directory, project.FileName)); exists {
 		return fmt.Errorf("setup: inject.toml already exists")
 	}
 
-	if legacyEnvExists {
-		fmt.Fprintln(request.Output, "Detected legacy .env")
-	}
 	candidates := candidatePackageScripts(request.Directory)
-	for _, name := range candidates {
-		if name == "dev" {
-			fmt.Fprintln(request.Output, "Candidate command: dev (default)")
-			continue
-		}
-		fmt.Fprintf(request.Output, "Candidate command: %s\n", name)
-	}
 	if request.PackageScript == "" && request.Binding == "" && request.SelectPackageScript != nil {
 		selection, err := request.SelectPackageScript(candidates, defaultPackageScript(candidates))
 		if err != nil {
@@ -103,11 +111,17 @@ func Run(request Request) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(request.Output, "Will write inject.toml:")
-	fmt.Fprint(request.Output, string(configData))
+	setupPlan := buildPlan(request, inputs, candidates, configData)
+	previewPlan(request.Output, setupPlan)
 	if !request.Confirm {
 		fmt.Fprintln(request.Output, "No changes made; rerun with explicit confirmation")
 		return nil
+	}
+	if !request.Local && effectiveProvider(request) == "1password" {
+		if err := checkOnePassword(request); err != nil {
+			fmt.Fprintln(request.Output, "1Password is unavailable; run `op signin` and retry")
+			return err
+		}
 	}
 	if !request.Local || request.RemoveLegacyEnv || len(request.Validate) > 0 {
 		if err := validateValidationCommand(request.Validate); err != nil {
@@ -146,7 +160,7 @@ func Run(request Request) error {
 		}
 	}
 	fmt.Fprintln(request.Output, "Validation succeeded")
-	if request.RemoveLegacyEnv && legacyEnvExists {
+	if request.RemoveLegacyEnv && hasPlaintextInput(inputs, ".env") {
 		if !request.ConfirmRemoveEnv {
 			fmt.Fprintln(request.Output, "Legacy .env was retained; its removal requires explicit confirmation")
 			return nil
@@ -159,18 +173,238 @@ func Run(request Request) error {
 	return nil
 }
 
-func selectSource(request *Request, legacyEnvExists bool) {
-	if request.Local || request.Provider != "" || hasRemoteReference(*request) || !legacyEnvExists {
+func selectSource(request *Request, plaintextInputExists bool) {
+	if request.Local || request.Provider != "" || hasRemoteReference(*request) || !plaintextInputExists {
 		return
 	}
 	request.Local = true
+}
+
+func buildPlan(request Request, inputs []PlaintextInput, scripts []string, configData []byte) Plan {
+	plan := Plan{
+		ProjectID:         request.ProjectID,
+		Source:            effectiveProvider(request),
+		PlaintextInputs:   inputs,
+		ValidationCommand: append([]string(nil), request.Validate...),
+		PackageManager:    detectPackageManager(request.Directory),
+		FileChanges:       []string{"create inject.toml"},
+		ConfigData:        configData,
+	}
+	if request.Local {
+		plan.Source = "local"
+	}
+	for _, name := range scripts {
+		plan.DeveloperCommands = append(plan.DeveloperCommands, DeveloperCommand{Name: name, Default: isRuntimeScript(name)})
+		if isFiniteValidationScript(name) {
+			plan.ValidationCandidates = append(plan.ValidationCandidates, name)
+		}
+	}
+	if request.RemoveLegacyEnv {
+		plan.FileChanges = append(plan.FileChanges, "remove .env after successful validation")
+	}
+	return plan
+}
+
+func previewPlan(output io.Writer, plan Plan) {
+	fmt.Fprintln(output, "Setup plan:")
+	fmt.Fprintf(output, "Project ID: %s\n", plan.ProjectID)
+	switch plan.Source {
+	case "local":
+		fmt.Fprintln(output, "Source choices: Local (selected), 1Password, Bitwarden")
+	case "bitwarden":
+		fmt.Fprintln(output, "Source choices: Local, 1Password, Bitwarden (selected)")
+	default:
+		fmt.Fprintln(output, "Source choices: Local, 1Password (selected), Bitwarden")
+	}
+	for _, input := range plan.PlaintextInputs {
+		state := "available"
+		if input.Selected {
+			state = "selected"
+		}
+		details := fmt.Sprintf("%s; profile %s", state, input.Profile)
+		if input.Precedence != "" {
+			details += "; precedence " + input.Precedence
+		}
+		fmt.Fprintf(output, "Plaintext input: %s (%s)\n", input.Name, details)
+	}
+	for _, command := range plan.DeveloperCommands {
+		if command.Default {
+			fmt.Fprintf(output, "Developer command: %s (default)\n", command.Name)
+			continue
+		}
+		fmt.Fprintf(output, "Developer command: %s\n", command.Name)
+	}
+	for _, name := range plan.ValidationCandidates {
+		fmt.Fprintf(output, "Validation candidate: %s\n", name)
+	}
+	if len(plan.ValidationCommand) > 0 {
+		command, _ := json.Marshal(plan.ValidationCommand)
+		fmt.Fprintf(output, "Selected validation: %s\n", command)
+	}
+	fmt.Fprintf(output, "Package manager: %s\n", plan.PackageManager)
+	for _, change := range plan.FileChanges {
+		fmt.Fprintf(output, "File change: %s\n", change)
+	}
+	fmt.Fprintln(output, "Will write inject.toml:")
+	fmt.Fprint(output, string(plan.ConfigData))
+}
+
+func detectPlaintextInputs(directory string) []PlaintextInput {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !isPlaintextInputName(name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Slice(names, func(left, right int) bool {
+		if names[left] == ".env" {
+			return true
+		}
+		if names[right] == ".env" {
+			return false
+		}
+		return names[left] < names[right]
+	})
+	inputs := make([]PlaintextInput, 0, len(names))
+	for _, name := range names {
+		input := PlaintextInput{Name: name, Profile: "default", Selected: name == ".env"}
+		if name != ".env" {
+			input.Profile = strings.TrimPrefix(name, ".env.")
+			if hasPlaintextInputName(names, ".env") {
+				input.Precedence = ".env < " + name
+			}
+		}
+		inputs = append(inputs, input)
+	}
+	return inputs
+}
+
+func isPlaintextInputName(name string) bool {
+	if name == ".env" {
+		return true
+	}
+	if !strings.HasPrefix(name, ".env.") || len(name) == len(".env.") {
+		return false
+	}
+	excluded := map[string]bool{
+		"example": true, "examples": true, "sample": true, "template": true,
+		"tmpl": true, "dist": true, "backup": true, "bak": true, "old": true,
+		"orig": true, "generated": true,
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(name, ".env."), ".") {
+		if excluded[strings.ToLower(part)] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasPlaintextInput(inputs []PlaintextInput, name string) bool {
+	for _, input := range inputs {
+		if input.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPlaintextInputName(inputs []string, name string) bool {
+	for _, input := range inputs {
+		if input == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isRuntimeScript(name string) bool {
+	switch strings.ToLower(name) {
+	case "dev", "start", "serve":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFiniteValidationScript(name string) bool {
+	switch strings.ToLower(name) {
+	case "test", "check", "lint", "typecheck", "type-check", "build":
+		return true
+	default:
+		return false
+	}
+}
+
+func detectPackageManager(directory string) string {
+	hasPackageManifest := false
+	if data, err := os.ReadFile(filepath.Join(directory, "package.json")); err == nil {
+		hasPackageManifest = true
+		var manifest struct {
+			PackageManager string `json:"packageManager"`
+		}
+		if json.Unmarshal(data, &manifest) == nil {
+			family, _, _ := strings.Cut(manifest.PackageManager, "@")
+			switch family {
+			case "npm", "pnpm", "yarn", "bun":
+				return family
+			}
+		}
+	}
+	for _, candidate := range []struct {
+		file   string
+		family string
+	}{
+		{file: "pnpm-lock.yaml", family: "pnpm"},
+		{file: "yarn.lock", family: "yarn"},
+		{file: "bun.lock", family: "bun"},
+		{file: "bun.lockb", family: "bun"},
+		{file: "package-lock.json", family: "npm"},
+	} {
+		if _, exists := statFile(filepath.Join(directory, candidate.file)); exists {
+			return candidate.family
+		}
+	}
+	if hasPackageManifest {
+		return "npm"
+	}
+	return "not detected"
 }
 
 func hasRemoteReference(request Request) bool {
 	return request.Account != "" || request.Vault != "" || request.ItemID != "" || request.Item != ""
 }
 
+func effectiveProvider(request Request) string {
+	if request.Local {
+		return "local"
+	}
+	if request.Provider != "" {
+		return request.Provider
+	}
+	if hasRemoteReference(request) {
+		return "1password"
+	}
+	return ""
+}
+
 func defaultProjectID(directory string) (string, error) {
+	if data, err := os.ReadFile(filepath.Join(directory, "package.json")); err == nil {
+		var manifest struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(data, &manifest) == nil && strings.TrimSpace(manifest.Name) != "" {
+			return manifest.Name, nil
+		}
+	}
+	if root, err := exec.Command("git", "-C", directory, "rev-parse", "--show-toplevel").Output(); err == nil {
+		return filepath.Base(strings.TrimSpace(string(root))), nil
+	}
 	absoluteDirectory, err := filepath.Abs(directory)
 	if err != nil {
 		return "", fmt.Errorf("setup: determine project directory: %w", err)
@@ -182,16 +416,20 @@ func validateRequest(request Request) error {
 	if strings.TrimSpace(request.ProjectID) == "" {
 		return fmt.Errorf("setup: project ID is required")
 	}
-	if request.Provider != "" && request.Provider != "1password" {
+	provider := effectiveProvider(request)
+	if provider == "" {
+		return fmt.Errorf("setup: source is required (local, 1password, or bitwarden)")
+	}
+	if provider != "local" && provider != "1password" && provider != "bitwarden" {
 		return fmt.Errorf("setup: unsupported provider %q", request.Provider)
 	}
-	if request.Provider == "1password" && request.Local {
+	if request.Provider != "" && request.Local {
 		return fmt.Errorf("setup: provider and local source cannot be selected together")
 	}
 	if request.Local {
 		return nil
 	}
-	if strings.TrimSpace(request.Account) == "" || strings.TrimSpace(request.Vault) == "" {
+	if provider == "1password" && (strings.TrimSpace(request.Account) == "" || strings.TrimSpace(request.Vault) == "") {
 		return fmt.Errorf("setup: project ID, 1Password account, and vault are required")
 	}
 	if strings.TrimSpace(request.ItemID) == "" && strings.TrimSpace(request.Item) == "" {
@@ -222,7 +460,7 @@ func checkOnePassword(request Request) error {
 
 func plan(request Request) (project.Config, error) {
 	profile := project.Profile{
-		Provider: "1password", Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
+		Provider: effectiveProvider(request), Account: request.Account, Vault: request.Vault, ItemID: request.ItemID, Item: request.Item,
 	}
 	if request.Local {
 		profile = project.Profile{Provider: "local"}
@@ -338,6 +576,17 @@ func runValidation(request Request, localSecrets map[string]string) error {
 	}
 	if request.Local {
 		return executor.RunCommand(request.Validate, localSecrets)
+	}
+	if effectiveProvider(request) == "bitwarden" {
+		provider, err := vaults.NewBitwardenProvider()
+		if err != nil {
+			return err
+		}
+		secrets, err := provider.Fetch(requestContext(), vaults.BitwardenReference{ItemID: request.ItemID, Item: request.Item})
+		if err != nil {
+			return err
+		}
+		return executor.RunCommand(request.Validate, secrets)
 	}
 	provider, err := vaults.NewOnePasswordProvider()
 	if err != nil {

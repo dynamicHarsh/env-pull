@@ -96,7 +96,7 @@ func selectPackageScript(candidates []string, defaultScript string) (string, err
 
 func init() {
 	setupCmd.Flags().StringVar(&setupProjectID, "project-id", "", "stable project identifier")
-	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password)")
+	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password or bitwarden)")
 	setupCmd.Flags().StringVar(&setupAccount, "account", "", "1Password account")
 	setupCmd.Flags().StringVar(&setupVault, "vault", "", "1Password vault")
 	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable 1Password item ID")

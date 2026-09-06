@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -43,8 +44,8 @@ func TestRunDoesNotChangeProjectWhenOnePasswordIsUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run() error = nil, want unavailable 1Password error")
 	}
-	if got, want := output.String(), "1Password is unavailable; run `op signin` and retry\n"; got != want {
-		t.Errorf("output = %q, want %q", got, want)
+	if got := output.String(); !strings.Contains(got, "Setup plan:") || !strings.Contains(got, "1Password is unavailable; run `op signin` and retry") || strings.Contains(got, "secret-value") {
+		t.Errorf("output = %q, want non-secret plan followed by unavailable provider guidance", got)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
 		t.Errorf("inject.toml stat error = %v, want no configuration written", err)
@@ -66,6 +67,185 @@ func TestRunPreviewsConfigurationUntilConfirmed(t *testing.T) {
 	}
 	if got := output.String(); !bytes.Contains([]byte(got), []byte("Will write inject.toml:")) || bytes.Contains([]byte(got), []byte("secret-value")) {
 		t.Errorf("preview = %q, want non-secret configuration preview", got)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
+	}
+}
+
+func TestRunPrefersPackageNameForDetectedProjectID(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=secret-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"name":"billing-api"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+	var output bytes.Buffer
+
+	if err := setup.Run(setup.Request{Directory: directory, Store: credentialStore, Output: &output}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, `project_id = "billing-api"`) {
+		t.Errorf("preview = %q, want package name as detected project ID", got)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
+		t.Error("Get() error = nil after preview, want unavailable secret set")
+	}
+}
+
+func TestRunPreviewsCompleteDetectedPlanWithoutMutation(t *testing.T) {
+	directory := t.TempDir()
+	files := map[string]string{
+		".env":                    "BASE_TOKEN=base-secret\n",
+		".env.staging":            "API_TOKEN=staging-secret\n",
+		".env.production.example": "API_TOKEN=placeholder-secret\n",
+		".env.backup":             "API_TOKEN=backup-secret\n",
+		"pnpm-lock.yaml":          "lockfileVersion: '9.0'\n",
+		"package.json":            `{"name":"billing-api","scripts":{"start":"node .","dev":"vite","serve":"http-server","test":"go test ./...","lint":"eslint .","build":"vite build","release":"shipit"}}`,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	credentialStore := store.NewMemory()
+	var output bytes.Buffer
+
+	if err := setup.Run(setup.Request{Directory: directory, Validate: []string{"pnpm", "test"}, Store: credentialStore, Output: &output}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	preview := output.String()
+	for _, want := range []string{
+		"Setup plan:",
+		"Project ID: billing-api",
+		"Source choices: Local (selected), 1Password, Bitwarden",
+		"Plaintext input: .env (selected; profile default)",
+		"Plaintext input: .env.staging (available; profile staging; precedence .env < .env.staging)",
+		"Developer command: dev (default)",
+		"Developer command: start (default)",
+		"Developer command: serve (default)",
+		"Developer command: release",
+		"Developer command: build",
+		"Developer command: lint",
+		"Developer command: test",
+		"Validation candidate: build",
+		"Validation candidate: lint",
+		"Validation candidate: test",
+		`Selected validation: ["pnpm","test"]`,
+		"Package manager: pnpm",
+		"File change: create inject.toml",
+	} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("preview = %q, want %q", preview, want)
+		}
+	}
+	for _, excluded := range []string{".env.production.example", ".env.backup", "base-secret", "staging-secret", "placeholder-secret", "backup-secret"} {
+		if strings.Contains(preview, excluded) {
+			t.Errorf("preview = %q, must exclude %q", preview, excluded)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
+	}
+	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
+		t.Error("Get() error = nil after preview, want unavailable secret set")
+	}
+}
+
+func TestRunRequiresExplicitSourceWithoutPlaintextInput(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"name":"billing-api"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, ".env.example"), []byte("TOKEN=placeholder-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := store.NewMemory()
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{Directory: directory, Store: credentialStore, Output: &output})
+	if err == nil || err.Error() != "setup: source is required (local, 1password, or bitwarden)" {
+		t.Fatalf("Run() error = %v, want explicit source error", err)
+	}
+	if output.Len() != 0 {
+		t.Errorf("output = %q, want no incomplete preview", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration after invalid input", err)
+	}
+}
+
+func TestRunDetectsAndValidatesStableProjectID(t *testing.T) {
+	t.Run("Git repository before directory", func(t *testing.T) {
+		parent := t.TempDir()
+		directory := filepath.Join(parent, "repository-name")
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command("git", "init", "--quiet", directory).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v: %s", err, output)
+		}
+		var output bytes.Buffer
+		if err := setup.Run(setup.Request{Directory: directory, Local: true, Output: &output}); err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if got := output.String(); !strings.Contains(got, "Project ID: repository-name") {
+			t.Errorf("preview = %q, want Git repository name", got)
+		}
+	})
+
+	t.Run("explicit override", func(t *testing.T) {
+		directory := t.TempDir()
+		if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"name":"detected-name"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		if err := setup.Run(setup.Request{Directory: directory, ProjectID: "chosen-name", Local: true, Output: &output}); err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+		if got := output.String(); !strings.Contains(got, "Project ID: chosen-name") {
+			t.Errorf("preview = %q, want explicit project ID", got)
+		}
+	})
+
+	t.Run("invalid override", func(t *testing.T) {
+		directory := t.TempDir()
+		credentialStore := store.NewMemory()
+		var output bytes.Buffer
+		err := setup.Run(setup.Request{Directory: directory, ProjectID: "not valid", Local: true, Confirm: true, Store: credentialStore, Output: &output})
+		if err == nil || !strings.Contains(err.Error(), "project_id must be a stable identifier") {
+			t.Fatalf("Run() error = %v, want stable identifier error", err)
+		}
+		if output.Len() != 0 {
+			t.Errorf("output = %q, want no invalid preview", output.String())
+		}
+		if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+			t.Errorf("inject.toml stat error = %v, want no configuration after invalid input", err)
+		}
+	})
+}
+
+func TestRunPlansBitwardenSource(t *testing.T) {
+	directory := t.TempDir()
+	var output bytes.Buffer
+	err := setup.Run(setup.Request{
+		Directory: directory,
+		ProjectID: "billing-api",
+		Provider:  "bitwarden",
+		ItemID:    "note-id",
+		Output:    &output,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	preview := output.String()
+	if !strings.Contains(preview, "Source choices: Local, 1Password, Bitwarden (selected)") || !strings.Contains(preview, `provider = "bitwarden"`) {
+		t.Errorf("preview = %q, want selected Bitwarden source", preview)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
 		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
@@ -421,7 +601,7 @@ func TestRunOffersDevAsDefaultPackageScriptBinding(t *testing.T) {
 	if err := setup.Run(request); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got := output.String(); !strings.Contains(got, "Candidate command: dev (default)") || !strings.Contains(got, "Candidate command: lint") || !strings.Contains(got, "Candidate command: test") {
+	if got := output.String(); !strings.Contains(got, "Developer command: dev (default)") || !strings.Contains(got, "Developer command: lint") || !strings.Contains(got, "Developer command: test") {
 		t.Errorf("output = %q, want dev default and all package scripts", got)
 	}
 }
