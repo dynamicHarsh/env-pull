@@ -1,37 +1,38 @@
 "use client";
 
-import { Terminal, Cloud, FileKey } from "lucide-react";
+import { Terminal, Cloud, Play } from "lucide-react";
 import { motion } from "framer-motion";
 
 const features = [
   {
     icon: Terminal,
-    title: "Sub-shell Injection",
+    title: "Secrets stay in memory",
     description: (
       <>
-        <span className="font-mono text-zinc-300">inject</span> wraps the
-        process and injects secrets directly into memory. They vanish when the
-        terminal closes.
+        <span className="font-mono text-zinc-300">inject</span> wraps your
+        process. Secrets pass through OS environment inheritance and vanish when
+        the terminal closes.
       </>
     ),
   },
   {
     icon: Cloud,
-    title: "Zero-Config Upstream Vaults",
+    title: "Your vault, your auth",
     description: (
       <>
-        AWS SDK & 1Password IPC integration. If your CLI is logged in,{" "}
-        <span className="font-mono text-zinc-300">inject</span> is logged in.
+        1Password and Bitwarden integration through their existing CLI sessions.
+        No new accounts, tokens, or sync tools.
       </>
     ),
   },
   {
-    icon: FileKey,
-    title: "The env-edit Workflow",
+    icon: Play,
+    title: "Your commands don’t change",
     description: (
       <>
-        Local/personal overrides powered by instantly encrypted{" "}
-        <span className="font-mono text-zinc-300">AES-GCM</span> local files.
+        After setup, <span className="font-mono text-zinc-300">npm run dev</span>{" "}
+        still works. <span className="font-mono text-zinc-300">inject</span> binds
+        to your existing scripts.
       </>
     ),
   },

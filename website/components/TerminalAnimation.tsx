@@ -1,18 +1,40 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import type { WorkflowMode } from "@/components/HeroSection";
 
-const COMMAND = "$ inject run --aws-secret npm run dev";
+const SEQUENCES: Record<WorkflowMode, { command: string; response: string; second: string; ready: string }> = {
+  local: {
+    command: "$ inject setup",
+    response: '[inject] Imported 12 secrets from .env into credential store.',
+    second: "$ npm run dev",
+    ready: "> Ready on http://localhost:3000",
+  },
+  onepassword: {
+    command: "$ inject setup",
+    response: '[inject] Connected to 1Password vault "Engineering".',
+    second: "$ npm run dev",
+    ready: "> Ready on http://localhost:3000",
+  },
+};
+
 const CHAR_DELAY_MS = 42;
 
-export default function TerminalAnimation() {
+interface TerminalAnimationProps {
+  workflowMode: WorkflowMode;
+}
+
+export default function TerminalAnimation({ workflowMode }: TerminalAnimationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hasStarted, setHasStarted] = useState(false);
   const [typed, setTyped] = useState("");
-  const [phase, setPhase] = useState<"idle" | "injected" | "ready">("idle");
+  const [phase, setPhase] = useState<"idle" | "response" | "second" | "ready">("idle");
+  const [secondTyped, setSecondTyped] = useState("");
+  const animationRef = useRef<number>(0);
 
-  // Start animation when terminal enters the viewport
+  const seq = SEQUENCES[workflowMode];
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -31,29 +53,77 @@ export default function TerminalAnimation() {
     return () => observer.disconnect();
   }, []);
 
-  // Typing sequence — only runs after viewport entry
+  const resetAnimation = useCallback(() => {
+    animationRef.current++;
+    setTyped("");
+    setSecondTyped("");
+    setPhase("idle");
+  }, []);
+
+  useEffect(() => {
+    resetAnimation();
+  }, [workflowMode, resetAnimation]);
+
   useEffect(() => {
     if (!hasStarted) return;
 
+    const runId = animationRef.current;
     let charIndex = 0;
+    const command = seq.command;
+
     const interval = setInterval(() => {
-      charIndex++;
-      setTyped(COMMAND.slice(0, charIndex));
-      if (charIndex === COMMAND.length) {
+      if (runId !== animationRef.current) {
         clearInterval(interval);
-        setTimeout(() => setPhase("injected"), 380);
+        return;
+      }
+      charIndex++;
+      setTyped(command.slice(0, charIndex));
+      if (charIndex === command.length) {
+        clearInterval(interval);
+        setTimeout(() => {
+          if (runId === animationRef.current) setPhase("response");
+        }, 380);
       }
     }, CHAR_DELAY_MS);
 
     return () => clearInterval(interval);
-  }, [hasStarted]);
+  }, [hasStarted, workflowMode, seq.command]);
 
   useEffect(() => {
-    if (phase === "injected") {
-      const t = setTimeout(() => setPhase("ready"), 700);
-      return () => clearTimeout(t);
-    }
+    if (phase !== "response") return;
+
+    const runId = animationRef.current;
+    const t = setTimeout(() => {
+      if (runId !== animationRef.current) return;
+      setPhase("second");
+    }, 700);
+    return () => clearTimeout(t);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "second") return;
+
+    const runId = animationRef.current;
+    let charIndex = 0;
+    const command = seq.second;
+
+    const interval = setInterval(() => {
+      if (runId !== animationRef.current) {
+        clearInterval(interval);
+        return;
+      }
+      charIndex++;
+      setSecondTyped(command.slice(0, charIndex));
+      if (charIndex === command.length) {
+        clearInterval(interval);
+        setTimeout(() => {
+          if (runId === animationRef.current) setPhase("ready");
+        }, 380);
+      }
+    }, CHAR_DELAY_MS);
+
+    return () => clearInterval(interval);
+  }, [phase, seq.second]);
 
   return (
     <div
@@ -71,35 +141,53 @@ export default function TerminalAnimation() {
       </div>
 
       {/* Terminal body */}
-      <div className="p-5 font-mono text-sm leading-relaxed min-h-[130px]">
-        {/* Command line */}
+      <div className="p-5 font-mono text-sm leading-relaxed min-h-[170px]">
+        {/* First command */}
         <div>
           <span className="text-zinc-300">{typed}</span>
-          {phase === "idle" && (
+          {phase === "idle" && typed.length > 0 && typed.length < seq.command.length && (
             <span className="animate-pulse text-terminal-green ml-px">▌</span>
           )}
         </div>
 
-        {/* Injection success */}
+        {/* Setup response */}
         <AnimatePresence>
-          {(phase === "injected" || phase === "ready") && (
+          {(phase === "response" || phase === "second" || phase === "ready") && (
             <motion.div
-              key="injected"
+              key={`response-${workflowMode}`}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35 }}
               className="mt-2 text-terminal-green"
             >
-              [inject] Injected 14 secrets into memory.
+              {seq.response}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Server ready */}
+        {/* Second command */}
+        <AnimatePresence>
+          {(phase === "second" || phase === "ready") && (
+            <motion.div
+              key={`second-${workflowMode}`}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35 }}
+              className="mt-2"
+            >
+              <span className="text-zinc-300">{secondTyped}</span>
+              {phase === "second" && secondTyped.length < seq.second.length && (
+                <span className="animate-pulse text-terminal-green ml-px">▌</span>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Ready output */}
         <AnimatePresence>
           {phase === "ready" && (
             <motion.div
-              key="ready"
+              key={`ready-${workflowMode}`}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35 }}

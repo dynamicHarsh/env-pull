@@ -1,5 +1,5 @@
 import { FileText } from "lucide-react";
-import { siGithub, siX } from "simple-icons";
+import { siGithub } from "simple-icons";
 import SimpleIconComponent from "@/components/ui/SimpleIcon";
 
 export default function Footer() {
@@ -13,7 +13,9 @@ export default function Footer() {
         <ul className="flex items-center gap-6">
           <li>
             <a
-              href="#"
+              href="https://github.com/dynamicHarsh/inject"
+              target="_blank"
+              rel="noopener noreferrer"
               aria-label="GitHub"
               className="text-zinc-500 hover:text-zinc-300 transition-colors duration-200"
             >
@@ -22,16 +24,7 @@ export default function Footer() {
           </li>
           <li>
             <a
-              href="#"
-              aria-label="X"
-              className="text-zinc-500 hover:text-zinc-300 transition-colors duration-200"
-            >
-              <SimpleIconComponent icon={siX} size={16} />
-            </a>
-          </li>
-          <li>
-            <a
-              href="#"
+              href="/getting-started"
               aria-label="Docs"
               className="text-zinc-500 hover:text-zinc-300 transition-colors duration-200"
             >

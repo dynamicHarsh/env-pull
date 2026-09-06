@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s | inject",
   },
   description:
-    "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files. Secure your local workflow with AWS and 1Password integration.",
+    "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files. Secure your local workflow with 1Password and Bitwarden integration.",
   keywords: [
     "secrets management",
     "cli",
