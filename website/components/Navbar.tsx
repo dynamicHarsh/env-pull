@@ -8,8 +8,8 @@ import { siGithub } from "simple-icons";
 import SimpleIconComponent from "@/components/ui/SimpleIcon";
 
 const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "Security", href: "#security" },
+  { label: "Features", href: "/#features" },
+  { label: "Security", href: "/#security" },
   { label: "Getting Started", href: "/getting-started" },
 ];
 
