@@ -4,6 +4,7 @@ import { useState } from "react";
 import HeroSection from "@/components/HeroSection";
 import type { WorkflowMode } from "@/components/HeroSection";
 import LogoStrip from "@/components/LogoStrip";
+import HowItWorks from "@/components/HowItWorks";
 import FeatureGrid from "@/components/FeatureGrid";
 import ArchitectureSection from "@/components/ArchitectureSection";
 import GetStartedCTA from "@/components/GetStartedCTA";
@@ -35,6 +36,7 @@ export default function Home() {
       />
       <HeroSection workflowMode={workflowMode} setWorkflowMode={setWorkflowMode} />
       <LogoStrip />
+      <HowItWorks workflowMode={workflowMode} />
       <FeatureGrid />
       <ArchitectureSection />
       <GetStartedCTA />
