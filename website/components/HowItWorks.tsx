@@ -3,6 +3,7 @@
 import { FileDown, Play, Trash2, KeyRound } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { WorkflowMode } from "@/components/HeroSection";
+import SectionDivider from "@/components/SectionDivider";
 
 const sharedSteps = [
   {
@@ -93,7 +94,7 @@ export default function HowItWorks({
       id="how-it-works"
       className="w-full scroll-mt-24"
     >
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <SectionDivider />
       <div className="max-w-6xl mx-auto px-4 py-24 text-center">
         <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
           How it works

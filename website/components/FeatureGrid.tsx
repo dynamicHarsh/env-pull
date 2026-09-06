@@ -2,6 +2,7 @@
 
 import { Terminal, Cloud, Play } from "lucide-react";
 import { motion } from "framer-motion";
+import SectionDivider from "@/components/SectionDivider";
 
 const features = [
   {
@@ -55,7 +56,7 @@ const cardVariants = {
 export default function FeatureGrid() {
   return (
     <section id="features" className="w-full scroll-mt-24">
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <SectionDivider />
       <div className="max-w-6xl mx-auto px-4 pt-24 pb-0 text-center">
         <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
           Why inject

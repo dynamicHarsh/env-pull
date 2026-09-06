@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Check, Copy, ArrowRight } from "lucide-react";
 import Link from "next/link";
+import SectionDivider from "@/components/SectionDivider";
 
 const INSTALL_CMD = "brew tap dynamicHarsh/tap && brew install inject";
 
@@ -33,7 +34,7 @@ export default function GetStartedCTA() {
 
   return (
     <section id="get-started" className="w-full bg-zinc-900/30 scroll-mt-24">
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <SectionDivider />
       <div className="max-w-3xl mx-auto px-4 text-center py-24">
         <p className="text-xs font-mono text-terminal-green uppercase tracking-widest mb-4">
           Get Started
@@ -71,7 +72,7 @@ export default function GetStartedCTA() {
           <ArrowRight size={14} />
         </Link>
       </div>
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+      <SectionDivider />
     </section>
   );
 }

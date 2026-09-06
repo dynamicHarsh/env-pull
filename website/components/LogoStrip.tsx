@@ -1,4 +1,5 @@
 import SimpleIconComponent from "@/components/ui/SimpleIcon";
+import SectionDivider from "@/components/SectionDivider";
 
 let si1passwordIcon: import("simple-icons").SimpleIcon | null = null;
 let siBitwardenIcon: import("simple-icons").SimpleIcon | null = null;
@@ -29,9 +30,9 @@ function BitwardenFallback({ size }: { size: number }) {
 
 export default function LogoStrip() {
   return (
-    <div className="w-full py-8">
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
-      <div className="max-w-6xl mx-auto px-4 flex items-center justify-center gap-6">
+    <div className="w-full">
+      <SectionDivider />
+      <div className="max-w-6xl mx-auto px-4 py-8 flex items-center justify-center gap-6">
         <span className="text-xs text-zinc-500 font-mono">Works with</span>
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-2 text-zinc-500">
