@@ -1,7 +1,7 @@
-# Project: env-pull Landing Page
+# Project: inject Landing Page
 
 ## Executive Summary
-This project is the landing page for `env-pull` (The Universal Secrets Adapter). The tool provides zero-disk, zero-config secrets injection for local development. The landing page must appeal simultaneously to Developers (speed, zero friction) and DevSecOps/CISOs (auditability, zero-disk security). 
+This project is the landing page for `inject` (The Universal Secrets Adapter). The tool provides zero-disk, zero-config secrets injection for local development. The landing page must appeal simultaneously to Developers (speed, zero friction) and DevSecOps/CISOs (auditability, zero-disk security). 
 
 ## Aesthetic & Design Philosophy
 - **Vibe:** Dark-mode default, high-performance terminal aesthetic, minimal, precise. 

@@ -17,11 +17,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://envpull.tech"),
   title: {
-    default: "env-pull | The Universal Secrets Adapter",
-    template: "%s | env-pull",
+    default: "inject | Stop committing your secrets.",
+    template: "%s | inject",
   },
   description:
-    "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files. Secure your local workflow with AWS and 1Password integration.",
+    "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files. Secure your local workflow with 1Password and Bitwarden integration.",
   keywords: [
     "secrets management",
     "cli",
@@ -35,14 +35,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     url: "https://envpull.tech",
-    title: "env-pull | The Universal Secrets Adapter",
+    title: "inject | Stop committing your secrets.",
     description:
       "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files.",
-    siteName: "env-pull",
+    siteName: "inject",
   },
   twitter: {
     card: "summary_large_image",
-    title: "env-pull | The Universal Secrets Adapter",
+    title: "inject | Stop committing your secrets.",
     description:
       "Zero-disk, zero-config secrets injection for local development. Stop shuffling .env files.",
   },

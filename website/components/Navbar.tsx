@@ -10,7 +10,7 @@ import SimpleIconComponent from "@/components/ui/SimpleIcon";
 const navLinks = [
   { label: "Features", href: "#features" },
   { label: "Security", href: "#security" },
-  { label: "Enterprise", href: "#enterprise" },
+  { label: "Getting Started", href: "/getting-started" },
 ];
 
 export default function Navbar() {
@@ -23,7 +23,7 @@ export default function Navbar() {
         {/* Brand */}
         <Link href="/" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="flex items-center gap-0 shrink-0">
           <span className="font-mono font-bold text-zinc-100 tracking-tight text-sm">
-            env-pull
+            inject
           </span>
           <span className="w-2 h-4 bg-terminal-green animate-pulse inline-block ml-1 align-middle" />
         </Link>
@@ -56,7 +56,7 @@ export default function Navbar() {
         {/* Desktop CTA */}
         <div className="hidden md:flex items-center gap-3 shrink-0">
           <a
-            href="https://github.com/dynamicHarsh/env-pull"
+            href="https://github.com/dynamicHarsh/inject"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="GitHub repository"
@@ -65,7 +65,7 @@ export default function Navbar() {
             <SimpleIconComponent icon={siGithub} size={18} />
           </a>
           <a
-            href="#enterprise"
+            href="/getting-started"
             className="inline-flex items-center bg-[#f4f4f5] text-zinc-950 px-4 py-2 rounded-md font-mono text-sm font-semibold hover:bg-[#e4e4e7] transition-colors"
           >
             Get Started
@@ -113,14 +113,14 @@ export default function Navbar() {
               ))}
               <li className="pt-3 border-t border-zinc-800/50 mt-1 flex items-center gap-3">
                 <a
-                  href="#enterprise"
+                  href="/getting-started"
                   onClick={() => setMobileOpen(false)}
                   className="inline-flex items-center bg-[#f4f4f5] text-zinc-950 px-4 py-2 rounded-md font-mono text-sm font-semibold hover:bg-[#e4e4e7] transition-colors"
                 >
                   Get Started
                 </a>
                 <a
-                  href="https://github.com/dynamicHarsh/env-pull"
+                  href="https://github.com/dynamicHarsh/inject"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="GitHub repository"
