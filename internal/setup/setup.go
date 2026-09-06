@@ -198,12 +198,13 @@ func selectSource(request *Request, plaintextInputExists bool) {
 }
 
 func buildPlan(request Request, inputs []PlaintextInput, scripts []string, configData []byte) Plan {
+	packageManager, _ := detectPackageManager(request.Directory)
 	plan := Plan{
 		ProjectID:         request.ProjectID,
 		Source:            effectiveProvider(request),
 		PlaintextInputs:   inputs,
 		ValidationCommand: append([]string(nil), request.Validate...),
-		PackageManager:    detectPackageManager(request.Directory),
+		PackageManager:    packageManager,
 		FileChanges:       []string{"create inject.toml"},
 		ConfigData:        configData,
 	}
@@ -430,10 +431,8 @@ func isFiniteValidationScript(name string) bool {
 	}
 }
 
-func detectPackageManager(directory string) string {
-	hasPackageManifest := false
+func detectPackageManager(directory string) (string, error) {
 	if data, err := os.ReadFile(filepath.Join(directory, "package.json")); err == nil {
-		hasPackageManifest = true
 		var manifest struct {
 			PackageManager string `json:"packageManager"`
 		}
@@ -441,10 +440,14 @@ func detectPackageManager(directory string) string {
 			family, _, _ := strings.Cut(manifest.PackageManager, "@")
 			switch family {
 			case "npm", "pnpm", "yarn", "bun":
-				return family
+				return family, nil
+			case "":
+			default:
+				return "", fmt.Errorf("setup: unsupported package manager %q", family)
 			}
 		}
 	}
+	families := make(map[string]bool)
 	for _, candidate := range []struct {
 		file   string
 		family string
@@ -456,13 +459,19 @@ func detectPackageManager(directory string) string {
 		{file: "package-lock.json", family: "npm"},
 	} {
 		if _, exists := statFile(filepath.Join(directory, candidate.file)); exists {
-			return candidate.family
+			families[candidate.family] = true
 		}
 	}
-	if hasPackageManifest {
-		return "npm"
+	if len(families) == 0 {
+		return "", fmt.Errorf("setup: package manager is not detected")
 	}
-	return "not detected"
+	if len(families) > 1 {
+		return "", fmt.Errorf("setup: package manager metadata is ambiguous")
+	}
+	for family := range families {
+		return family, nil
+	}
+	panic("unreachable")
 }
 
 func hasRemoteReference(request Request) bool {
@@ -673,7 +682,10 @@ func packageScriptBindings(directory string, selected []string) (map[string]proj
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("setup: invalid package.json: %w", err)
 	}
-	manager := detectPackageManager(directory)
+	manager, err := detectPackageManager(directory)
+	if err != nil {
+		return nil, err
+	}
 	bindings := make(map[string]project.ScriptBinding, len(selected))
 	for _, name := range selected {
 		original, exists := manifest.Scripts[name]

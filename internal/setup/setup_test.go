@@ -699,6 +699,9 @@ func TestRunPreservesPackageScriptAndLifecycleHooksBehindInjectWrapper(t *testin
 	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	request := request(directory, io.Discard)
 	request.Confirm = true
 	request.PackageScript = "dev"
@@ -753,6 +756,9 @@ func TestRunRejectsReservedPackageScriptCollisionWithoutMutation(t *testing.T) {
 	if err := os.WriteFile(packagePath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	request := request(directory, io.Discard)
 	request.Confirm = true
 	request.PackageScripts = []string{"dev"}
@@ -777,6 +783,9 @@ func TestRunWrapsEachSelectedPackageScript(t *testing.T) {
 	directory := t.TempDir()
 	packagePath := filepath.Join(directory, "package.json")
 	if err := os.WriteFile(packagePath, []byte(`{"scripts":{"dev":"vite","serve":"http-server","test":"go test ./..."}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	request := request(directory, io.Discard)
@@ -810,9 +819,110 @@ func TestRunWrapsEachSelectedPackageScript(t *testing.T) {
 	}
 }
 
+func TestRunSelectsPackageManagerFromProjectMetadata(t *testing.T) {
+	for _, manager := range []string{"npm", "pnpm", "yarn", "bun"} {
+		t.Run(manager, func(t *testing.T) {
+			directory := t.TempDir()
+			original := `printf '%s\n' \"$TOKEN\" | tee output.log`
+			manifest := fmt.Sprintf(`{"packageManager":%q,"scripts":{"dev":%q}}`, manager+"@1.0.0", original)
+			if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			request := request(directory, &output)
+			request.PackageScripts = []string{"dev"}
+			request.Confirm = true
+			request.RunValidation = func([]string) error { return nil }
+
+			if err := setup.Run(request); err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if got := output.String(); !strings.Contains(got, `package_manager = "`+manager+`"`) {
+				t.Errorf("preview = %q, want package manager %q", got, manager)
+			}
+			data, err := os.ReadFile(filepath.Join(directory, "package.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rewritten struct {
+				Scripts map[string]string `json:"scripts"`
+			}
+			if err := json.Unmarshal(data, &rewritten); err != nil {
+				t.Fatal(err)
+			}
+			if got := rewritten.Scripts["inject:original:dev"]; got != original {
+				t.Errorf("preserved script = %q, want %q", got, original)
+			}
+		})
+	}
+}
+
+func TestRunRejectsMissingOrAmbiguousPackageManagerMetadata(t *testing.T) {
+	tests := []struct {
+		name      string
+		lockfiles []string
+		want      string
+	}{
+		{name: "missing", want: "package manager is not detected"},
+		{name: "ambiguous", lockfiles: []string{"package-lock.json", "pnpm-lock.yaml"}, want: "package manager metadata is ambiguous"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range test.lockfiles {
+				if err := os.WriteFile(filepath.Join(directory, name), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			request := request(directory, io.Discard)
+			request.PackageScripts = []string{"dev"}
+
+			err := setup.Run(request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Run() error = %v, want error containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestRunSelectsPackageManagerFromLockfileFallback(t *testing.T) {
+	for lockfile, manager := range map[string]string{
+		"package-lock.json": "npm",
+		"pnpm-lock.yaml":    "pnpm",
+		"yarn.lock":         "yarn",
+		"bun.lock":          "bun",
+	} {
+		t.Run(manager, func(t *testing.T) {
+			directory := t.TempDir()
+			if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, lockfile), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			request := request(directory, &output)
+			request.PackageScripts = []string{"dev"}
+
+			if err := setup.Run(request); err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if got := output.String(); !strings.Contains(got, `package_manager = "`+manager+`"`) {
+				t.Errorf("preview = %q, want package manager %q", got, manager)
+			}
+		})
+	}
+}
+
 func TestRunRejectsUnknownPackageScript(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	request := request(directory, io.Discard)
@@ -843,6 +953,9 @@ func TestRunOffersDevAsDefaultPackageScriptBinding(t *testing.T) {
 func TestRunSelectsDefaultPackageScriptBinding(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer

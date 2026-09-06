@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,7 +29,10 @@ var packageScriptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		manager := invokingPackageManager(binding.PackageManager)
+		manager, err := invokingPackageManager(binding.PackageManager)
+		if err != nil {
+			return fmt.Errorf("package script: %w", err)
+		}
 		for _, script := range []string{binding.PreScript, binding.Script, binding.PostScript} {
 			if script == "" {
 				continue
@@ -41,21 +45,63 @@ var packageScriptCmd = &cobra.Command{
 	},
 }
 
-func invokingPackageManager(fallback string) string {
-	if executable := os.Getenv("npm_execpath"); executable != "" {
-		if info, err := os.Stat(executable); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
-			return executable
+func invokingPackageManager(fallback string) (string, error) {
+	executable := os.Getenv("npm_execpath")
+	executableFamily := packageManagerFromExecutable(executable)
+	userAgent := os.Getenv("npm_config_user_agent")
+	userAgentFamily, _, _ := strings.Cut(userAgent, "/")
+	if !supportedPackageManager(userAgentFamily) {
+		userAgentFamily = ""
+	}
+	if executableFamily != "" && userAgentFamily != "" && executableFamily != userAgentFamily {
+		return "", fmt.Errorf("package manager metadata is ambiguous")
+	}
+	family := executableFamily
+	if family == "" {
+		family = userAgentFamily
+	}
+	if family == "" {
+		family = fallback
+	}
+	if !supportedPackageManager(family) {
+		return "", fmt.Errorf("package manager is not detected")
+	}
+	if executableFamily == family {
+		if path, err := exec.LookPath(executable); err == nil {
+			return path, nil
 		}
 	}
-	if family, _, found := strings.Cut(os.Getenv("npm_config_user_agent"), "/"); found {
-		switch family {
-		case "npm", "pnpm", "yarn", "bun":
-			if executable, err := exec.LookPath(family); err == nil {
-				return executable
-			}
-		}
+	path, err := exec.LookPath(family)
+	if err != nil {
+		return "", fmt.Errorf("package manager %q is unavailable", family)
 	}
-	return fallback
+	return path, nil
+}
+
+func packageManagerFromExecutable(executable string) string {
+	name := strings.ToLower(filepath.Base(strings.ReplaceAll(executable, `\`, "/")))
+	name = strings.TrimSuffix(name, ".exe")
+	switch name {
+	case "npm", "npm-cli.js":
+		return "npm"
+	case "pnpm", "pnpm.cjs":
+		return "pnpm"
+	case "yarn", "yarn.js", "yarnpkg":
+		return "yarn"
+	case "bun":
+		return "bun"
+	default:
+		return ""
+	}
+}
+
+func supportedPackageManager(family string) bool {
+	switch family {
+	case "npm", "pnpm", "yarn", "bun":
+		return true
+	default:
+		return false
+	}
 }
 
 func init() {
