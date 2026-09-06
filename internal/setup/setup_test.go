@@ -3,6 +3,7 @@ package setup_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -181,6 +182,28 @@ func TestRunRequiresExplicitSourceWithoutPlaintextInput(t *testing.T) {
 	}
 }
 
+func TestRunRequiresExplicitSourceOutsideTTY(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".env"), []byte("TOKEN=secret-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{
+		Directory:      directory,
+		ProjectID:      "billing-api",
+		NonInteractive: true,
+		Store:          store.NewMemory(),
+		Output:         &output,
+	})
+	if err == nil || err.Error() != "setup: source is required (local, 1password, or bitwarden)" {
+		t.Fatalf("Run() error = %v, want explicit source error", err)
+	}
+	if output.Len() != 0 {
+		t.Errorf("output = %q, want no guessed plan", output.String())
+	}
+}
+
 func TestRunDetectsAndValidatesStableProjectID(t *testing.T) {
 	t.Run("Git repository before directory", func(t *testing.T) {
 		parent := t.TempDir()
@@ -250,6 +273,42 @@ func TestRunPlansBitwardenSource(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
 		t.Errorf("inject.toml stat error = %v, want no configuration without confirmation", err)
+	}
+}
+
+func TestRunAppliesBitwardenSourceWithValidation(t *testing.T) {
+	directory := t.TempDir()
+	validationRan := false
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{
+		Directory: directory,
+		ProjectID: "billing-api",
+		Provider:  "bitwarden",
+		ItemID:    "note-id",
+		Confirm:   true,
+		Validate:  []string{"go", "test", "./..."},
+		RunValidation: func(command []string) error {
+			validationRan = reflect.DeepEqual(command, []string{"go", "test", "./..."})
+			return nil
+		},
+		Output: &output,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !validationRan {
+		t.Error("validation command did not run")
+	}
+	config, err := os.ReadFile(filepath.Join(directory, "inject.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(config, []byte(`provider = "bitwarden"`)) || !bytes.Contains(config, []byte(`item_id = "note-id"`)) {
+		t.Errorf("inject.toml = %q, want Bitwarden source", config)
+	}
+	if strings.Contains(output.String(), "secret") {
+		t.Errorf("output = %q, want secret-free output", output.String())
 	}
 }
 
@@ -627,6 +686,139 @@ func TestRunLocalDoesNotSaveSecretsWhenValidationFails(t *testing.T) {
 	}
 	if _, err := credentialStore.Get("billing-api", "default"); err == nil {
 		t.Error("Get() error = nil after failed validation, want unavailable secret set")
+	}
+}
+
+func TestRunRestoresCredentialStoreWhenProfileWriteFails(t *testing.T) {
+	directory := t.TempDir()
+	for name, contents := range map[string]string{
+		".env":         "TOKEN=new-default\n",
+		".env.staging": "TOKEN=new-staging\n",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memory := store.NewMemory()
+	if err := memory.Put("billing-api", "default", map[string]string{"TOKEN": "old-default"}); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := &failingPutStore{Store: memory, profile: "staging"}
+
+	err := setup.Run(setup.Request{
+		Directory:      directory,
+		ProjectID:      "billing-api",
+		Local:          true,
+		SelectedInputs: []string{".env", ".env.staging"},
+		Confirm:        true,
+		Store:          credentialStore,
+		Output:         io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), `save local profile "staging"`) {
+		t.Fatalf("Run() error = %v, want staging store failure", err)
+	}
+	got, err := memory.Get("billing-api", "default")
+	if err != nil || !reflect.DeepEqual(got, map[string]string{"TOKEN": "old-default"}) {
+		t.Errorf("default secret set = %q, %v; want restored prior value", got, err)
+	}
+	if _, err := memory.Get("billing-api", "staging"); !errors.Is(err, store.ErrUnavailable) {
+		t.Errorf("staging Get() error = %v, want unavailable after rollback", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no configuration", err)
+	}
+	for name := range map[string]string{".env": "", ".env.staging": ""} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			t.Errorf("%s stat error = %v, want plaintext retained", name, err)
+		}
+	}
+}
+
+func TestRunReportsFailedRollbackWithoutRunnableSetupOrSecretLeak(t *testing.T) {
+	directory := t.TempDir()
+	for name, contents := range map[string]string{
+		".env":         "TOKEN=new-default-secret\n",
+		".env.staging": "TOKEN=new-staging-secret\n",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memory := store.NewMemory()
+	if err := memory.Put("billing-api", "default", map[string]string{"TOKEN": "old-default-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := &rollbackFailingStore{Store: memory}
+	var output bytes.Buffer
+
+	err := setup.Run(setup.Request{
+		Directory:      directory,
+		ProjectID:      "billing-api",
+		Local:          true,
+		SelectedInputs: []string{".env", ".env.staging"},
+		Confirm:        true,
+		Store:          credentialStore,
+		Output:         &output,
+	})
+	if err == nil || !strings.Contains(err.Error(), `save local profile "staging"`) || !strings.Contains(err.Error(), `restore local profile "default"`) {
+		t.Fatalf("Run() error = %v, want store and rollback failures", err)
+	}
+	for _, secret := range []string{"new-default-secret", "new-staging-secret", "old-default-secret"} {
+		if strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
+			t.Errorf("secret %q leaked through error or output", secret)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, "inject.toml")); !os.IsNotExist(err) {
+		t.Errorf("inject.toml stat error = %v, want no runnable configuration", err)
+	}
+	for _, name := range []string{".env", ".env.staging"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			t.Errorf("%s stat error = %v, want plaintext retained", name, err)
+		}
+	}
+}
+
+func TestRunRestoresCredentialStoreAndProjectFilesWhenFileCommitFails(t *testing.T) {
+	directory := t.TempDir()
+	envPath := filepath.Join(directory, ".env")
+	packagePath := filepath.Join(directory, "package.json")
+	packageContents := []byte(`{"packageManager":"npm@10.0.0","scripts":{"dev":"vite"}}`)
+	if err := os.WriteFile(envPath, []byte("TOKEN=new-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagePath, packageContents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(directory, "inject.toml"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	memory := store.NewMemory()
+	if err := memory.Put("billing-api", "default", map[string]string{"TOKEN": "old-value"}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := setup.Run(setup.Request{
+		Directory:      directory,
+		ProjectID:      "billing-api",
+		Local:          true,
+		SelectedInputs: []string{".env"},
+		PackageScripts: []string{"dev"},
+		Confirm:        true,
+		Store:          memory,
+		Output:         io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "write inject.toml") {
+		t.Fatalf("Run() error = %v, want project-file commit failure", err)
+	}
+	got, err := memory.Get("billing-api", "default")
+	if err != nil || !reflect.DeepEqual(got, map[string]string{"TOKEN": "old-value"}) {
+		t.Errorf("default secret set = %q, %v; want restored prior value", got, err)
+	}
+	if got, err := os.ReadFile(packagePath); err != nil || !bytes.Equal(got, packageContents) {
+		t.Errorf("package.json = %q, %v; want unchanged", got, err)
+	}
+	if _, err := os.Stat(envPath); err != nil {
+		t.Errorf(".env stat error = %v, want plaintext retained", err)
 	}
 }
 
@@ -1030,4 +1222,34 @@ func request(directory string, output io.Writer) setup.Request {
 		},
 		Output: output,
 	}
+}
+
+type failingPutStore struct {
+	store.Store
+	profile string
+}
+
+func (store *failingPutStore) Put(projectID, profile string, secrets map[string]string) error {
+	if profile == store.profile {
+		return fmt.Errorf("store unavailable")
+	}
+	return store.Store.Put(projectID, profile, secrets)
+}
+
+type rollbackFailingStore struct {
+	store.Store
+	defaultWrites int
+}
+
+func (store *rollbackFailingStore) Put(projectID, profile string, secrets map[string]string) error {
+	if profile == "staging" {
+		return fmt.Errorf("store unavailable")
+	}
+	if profile == "default" {
+		store.defaultWrites++
+		if store.defaultWrites > 1 {
+			return fmt.Errorf("rollback unavailable")
+		}
+	}
+	return store.Store.Put(projectID, profile, secrets)
 }

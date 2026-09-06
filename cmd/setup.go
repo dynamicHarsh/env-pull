@@ -33,11 +33,12 @@ var (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Configure inject for a 1Password secret note",
+	Short: "Configure inject for a local or remote secret source",
 	Long: `setup previews a non-secret inject.toml configuration and optional
 command bindings. Selected package scripts are preserved under inject-owned names
-so their existing package-manager commands continue to work. Setup checks the existing op CLI session before changing
-project files for remote sources. A detected .env selects local credential-store
+so their existing package-manager commands continue to work. Setup validates the selected
+provider through its existing CLI authentication context before changing project files.
+A detected .env selects local credential-store
 migration unless a remote provider or reference is selected.
 
 Use --yes to apply the preview. Remote setup requires a finite validation command.
@@ -45,6 +46,11 @@ Use --remove-env together with --yes-remove-env to delete a detected legacy .env
 after a successful validation.`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
+		interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+		var scriptSelector func([]string, string) (string, error)
+		if interactive {
+			scriptSelector = selectPackageScript
+		}
 		return setupworkflow.Run(setupworkflow.Request{
 			ProjectID:           setupProjectID,
 			Provider:            setupProvider,
@@ -54,7 +60,7 @@ after a successful validation.`,
 			Item:                setupItem,
 			Binding:             setupBinding,
 			PackageScripts:      setupPackageScripts,
-			SelectPackageScript: selectPackageScript,
+			SelectPackageScript: scriptSelector,
 			Command:             setupCommand,
 			Validate:            setupValidation,
 			Local:               setupLocal,
@@ -63,9 +69,15 @@ after a successful validation.`,
 			Confirm:             setupConfirm,
 			RemoveLegacyEnv:     setupRemoveLegacyEnv,
 			ConfirmRemoveEnv:    setupConfirmRemoveEnv,
+			NonInteractive:      !interactive,
 			Output:              os.Stdout,
 		})
 	},
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func selectPackageScript(candidates []string, defaultScript string) (string, error) {
@@ -101,8 +113,8 @@ func init() {
 	setupCmd.Flags().StringVar(&setupProvider, "provider", "", "secret provider (1password or bitwarden)")
 	setupCmd.Flags().StringVar(&setupAccount, "account", "", "1Password account")
 	setupCmd.Flags().StringVar(&setupVault, "vault", "", "1Password vault")
-	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable 1Password item ID")
-	setupCmd.Flags().StringVar(&setupItem, "item", "", "1Password item name")
+	setupCmd.Flags().StringVar(&setupItemID, "item-id", "", "immutable remote item ID")
+	setupCmd.Flags().StringVar(&setupItem, "item", "", "remote item name")
 	setupCmd.Flags().StringVar(&setupBinding, "binding", "", "explicit command binding name")
 	setupCmd.Flags().StringSliceVar(&setupPackageScripts, "package-script", nil, "package.json script to preserve through injection; repeat for each script")
 	setupCmd.Flags().StringArrayVar(&setupCommand, "command", nil, "binding command argument; repeat for each argument")
