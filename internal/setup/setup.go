@@ -186,7 +186,7 @@ func Run(request Request) error {
 			return fmt.Errorf("setup: validation failed: %w", err)
 		}
 	}
-	if err := applyProjectFiles(request.Directory, config, configData); err != nil {
+	if err := applyProjectFiles(request.Directory, config, configData, writeFileAtomically); err != nil {
 		if rollbackStore != nil {
 			if rollbackErr := rollbackStore(); rollbackErr != nil {
 				return errors.Join(err, rollbackErr)
@@ -781,7 +781,7 @@ func packageScriptBindings(directory string, selected []string) (map[string]proj
 
 func reservedScriptName(name string) string { return "inject:original:" + name }
 
-func applyProjectFiles(directory string, config project.Config, configData []byte) error {
+func applyProjectFiles(directory string, config project.Config, configData []byte, writeFile func(string, []byte, os.FileMode) error) error {
 	manifestPath := filepath.Join(directory, "package.json")
 	var originalManifest []byte
 	if len(config.ScriptBindings) > 0 {
@@ -794,15 +794,18 @@ func applyProjectFiles(directory string, config project.Config, configData []byt
 		if err != nil {
 			return err
 		}
-		if err := writeFileAtomically(manifestPath, updatedManifest, 0o644); err != nil {
+		if err := writeFile(manifestPath, updatedManifest, 0o644); err != nil {
 			return fmt.Errorf("setup: write package.json: %w", err)
 		}
 	}
-	if err := writeFileAtomically(filepath.Join(directory, project.FileName), configData, 0o644); err != nil {
+	if err := writeFile(filepath.Join(directory, project.FileName), configData, 0o644); err != nil {
+		commitErr := fmt.Errorf("setup: write inject.toml: %w", err)
 		if originalManifest != nil {
-			_ = writeFileAtomically(manifestPath, originalManifest, 0o644)
+			if rollbackErr := writeFile(manifestPath, originalManifest, 0o644); rollbackErr != nil {
+				return errors.Join(commitErr, fmt.Errorf("setup: restore package.json: %w", rollbackErr))
+			}
 		}
-		return fmt.Errorf("setup: write inject.toml: %w", err)
+		return commitErr
 	}
 	return nil
 }
