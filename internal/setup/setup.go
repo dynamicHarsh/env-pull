@@ -45,6 +45,7 @@ type Request struct {
 	Confirm             bool
 	RemoveLegacyEnv     bool
 	ConfirmRemoveEnv    bool
+	NonInteractive      bool
 	CheckOnePassword    func() error
 	RunValidation       func([]string) error
 	Store               store.Store
@@ -149,6 +150,7 @@ func Run(request Request) error {
 			return err
 		}
 	}
+	var rollbackStore func() error
 	if request.Local {
 		if request.Store == nil {
 			return fmt.Errorf("setup: local credential store is unavailable")
@@ -161,8 +163,19 @@ func Run(request Request) error {
 				return fmt.Errorf("setup: validation failed: %w", err)
 			}
 		}
-		for profile, secrets := range localProfiles {
+		snapshots, err := snapshotProfiles(request.Store, request.ProjectID, localProfiles)
+		if err != nil {
+			return err
+		}
+		rollbackStore = func() error {
+			return restoreProfiles(request.Store, request.ProjectID, snapshots)
+		}
+		for _, profile := range sortedKeys(localProfiles) {
+			secrets := localProfiles[profile]
 			if err := request.Store.Put(request.ProjectID, profile, secrets); err != nil {
+				if rollbackErr := rollbackStore(); rollbackErr != nil {
+					return errors.Join(fmt.Errorf("setup: save local profile %q: %w", profile, err), rollbackErr)
+				}
 				return fmt.Errorf("setup: save local profile %q: %w", profile, err)
 			}
 		}
@@ -174,6 +187,11 @@ func Run(request Request) error {
 		}
 	}
 	if err := applyProjectFiles(request.Directory, config, configData); err != nil {
+		if rollbackStore != nil {
+			if rollbackErr := rollbackStore(); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
 		return err
 	}
 	fmt.Fprintln(request.Output, "Validation succeeded")
@@ -190,8 +208,46 @@ func Run(request Request) error {
 	return nil
 }
 
+type profileSnapshot struct {
+	secrets map[string]string
+	exists  bool
+}
+
+func snapshotProfiles(credentialStore store.Store, projectID string, profiles map[string]map[string]string) (map[string]profileSnapshot, error) {
+	snapshots := make(map[string]profileSnapshot, len(profiles))
+	for _, profile := range sortedKeys(profiles) {
+		secrets, err := credentialStore.Get(projectID, profile)
+		if err == nil {
+			snapshots[profile] = profileSnapshot{secrets: secrets, exists: true}
+			continue
+		}
+		if !errors.Is(err, store.ErrUnavailable) {
+			return nil, fmt.Errorf("setup: snapshot local profile %q: %w", profile, err)
+		}
+		snapshots[profile] = profileSnapshot{}
+	}
+	return snapshots, nil
+}
+
+func restoreProfiles(credentialStore store.Store, projectID string, snapshots map[string]profileSnapshot) error {
+	var rollbackErrors []error
+	for _, profile := range sortedKeys(snapshots) {
+		snapshot := snapshots[profile]
+		if snapshot.exists {
+			if err := credentialStore.Put(projectID, profile, snapshot.secrets); err != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("setup: restore local profile %q: %w", profile, err))
+			}
+			continue
+		}
+		if err := credentialStore.Delete(projectID, profile); err != nil && !errors.Is(err, store.ErrUnavailable) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("setup: remove local profile %q during rollback: %w", profile, err))
+		}
+	}
+	return errors.Join(rollbackErrors...)
+}
+
 func selectSource(request *Request, plaintextInputExists bool) {
-	if request.Local || request.Provider != "" || hasRemoteReference(*request) || !plaintextInputExists {
+	if request.Local || request.Provider != "" || hasRemoteReference(*request) || !plaintextInputExists || request.NonInteractive {
 		return
 	}
 	request.Local = true
@@ -738,17 +794,42 @@ func applyProjectFiles(directory string, config project.Config, configData []byt
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(manifestPath, updatedManifest, 0o644); err != nil {
+		if err := writeFileAtomically(manifestPath, updatedManifest, 0o644); err != nil {
 			return fmt.Errorf("setup: write package.json: %w", err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(directory, project.FileName), configData, 0o644); err != nil {
+	if err := writeFileAtomically(filepath.Join(directory, project.FileName), configData, 0o644); err != nil {
 		if originalManifest != nil {
-			_ = os.WriteFile(manifestPath, originalManifest, 0o644)
+			_ = writeFileAtomically(manifestPath, originalManifest, 0o644)
 		}
 		return fmt.Errorf("setup: write inject.toml: %w", err)
 	}
 	return nil
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) (err error) {
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".inject-setup-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+	}()
+	if err = temporary.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err = temporary.Write(data); err != nil {
+		return err
+	}
+	if err = temporary.Sync(); err != nil {
+		return err
+	}
+	if err = temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 func rewritePackageScripts(data []byte, bindings map[string]project.ScriptBinding) ([]byte, error) {

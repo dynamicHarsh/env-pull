@@ -45,6 +45,11 @@ Use --remove-env together with --yes-remove-env to delete a detected legacy .env
 after a successful validation.`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
+		interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+		var scriptSelector func([]string, string) (string, error)
+		if interactive {
+			scriptSelector = selectPackageScript
+		}
 		return setupworkflow.Run(setupworkflow.Request{
 			ProjectID:           setupProjectID,
 			Provider:            setupProvider,
@@ -54,7 +59,7 @@ after a successful validation.`,
 			Item:                setupItem,
 			Binding:             setupBinding,
 			PackageScripts:      setupPackageScripts,
-			SelectPackageScript: selectPackageScript,
+			SelectPackageScript: scriptSelector,
 			Command:             setupCommand,
 			Validate:            setupValidation,
 			Local:               setupLocal,
@@ -63,9 +68,15 @@ after a successful validation.`,
 			Confirm:             setupConfirm,
 			RemoveLegacyEnv:     setupRemoveLegacyEnv,
 			ConfirmRemoveEnv:    setupConfirmRemoveEnv,
+			NonInteractive:      !interactive,
 			Output:              os.Stdout,
 		})
 	},
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func selectPackageScript(candidates []string, defaultScript string) (string, error) {
